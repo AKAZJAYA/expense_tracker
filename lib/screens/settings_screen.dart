@@ -3,6 +3,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/database_service.dart';
 import '../services/export_service.dart';
+import 'categories_screen.dart'; // Add this import at the top
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -38,15 +39,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _carryOverEnabled = value;
     });
-    
+
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            value 
-              ? 'Balance carry-over enabled' 
-              : 'Balance carry-over disabled'
-          ),
+          content: Text(value
+              ? 'Balance carry-over enabled'
+              : 'Balance carry-over disabled'),
           duration: const Duration(seconds: 2),
         ),
       );
@@ -96,7 +95,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _selectedTheme = result;
       });
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -148,15 +147,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _notificationsEnabled = result;
       });
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              result 
-                ? 'Notifications enabled' 
-                : 'Notifications disabled'
-            ),
+                result ? 'Notifications enabled' : 'Notifications disabled'),
             duration: const Duration(seconds: 2),
           ),
         );
@@ -166,11 +162,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _backupData() async {
     setState(() => _isLoading = true);
-    
+
     try {
       final transactions = await DatabaseService.instance.getAllTransactions();
       final categories = await DatabaseService.instance.getCategories();
-      
+
       if (transactions.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -205,11 +201,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _exportData() async {
     setState(() => _isLoading = true);
-    
+
     try {
       final transactions = await DatabaseService.instance.getAllTransactions();
       final categories = await DatabaseService.instance.getCategories();
-      
+
       if (transactions.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -266,10 +262,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (confirmed == true) {
       setState(() => _isLoading = true);
-      
+
       try {
         // Delete all transactions
-        final transactions = await DatabaseService.instance.getAllTransactions();
+        final transactions =
+            await DatabaseService.instance.getAllTransactions();
         for (var transaction in transactions) {
           await DatabaseService.instance.deleteTransaction(transaction.id!);
         }
@@ -309,19 +306,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _showAboutDialog() async {
     showAboutDialog(
       context: context,
-      applicationName: 'Expense Tracker',
+      applicationName: 'WalletFlow',
       applicationVersion: '1.0.0',
       applicationIcon: Container(
         width: 60,
         height: 60,
         decoration: BoxDecoration(
-          color: Theme.of(context).primaryColor,
           borderRadius: BorderRadius.circular(12),
         ),
-        child: const Icon(
-          Icons.account_balance_wallet,
-          color: Colors.white,
-          size: 32,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.asset(
+            'assets/logo/app_logo.png',
+            width: 60,
+            height: 60,
+            fit: BoxFit.cover,
+          ),
         ),
       ),
       children: [
@@ -347,7 +347,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const Text('• Receipt photo capture'),
         const SizedBox(height: 16),
         const Text(
-          '© 2024 Expense Tracker\nAll rights reserved.',
+          '© 2024 WalletFlow\nAll rights reserved.',
           style: TextStyle(fontSize: 12),
           textAlign: TextAlign.center,
         ),
@@ -402,6 +402,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 title: 'Theme',
                 subtitle: _selectedTheme,
                 onTap: _showThemeDialog,
+              ),
+              _buildSettingsTile(
+                icon: Icons.category_outlined,
+                title: 'Manage Categories',
+                subtitle: 'Add, edit, or delete categories',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const CategoriesScreen(),
+                    ),
+                  );
+                },
               ),
               _buildSettingsTile(
                 icon: Icons.notifications_outlined,

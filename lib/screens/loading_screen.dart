@@ -41,7 +41,7 @@ class _LoadingScreenState extends State<LoadingScreen>
   Future<void> _navigateAfterDelay() async {
     try {
       // Wait for animation to complete
-      await Future.delayed(const Duration(milliseconds: 2000));
+      await Future.delayed(const Duration(milliseconds: 1500));
 
       if (!mounted) return;
 
@@ -91,29 +91,38 @@ class _LoadingScreenState extends State<LoadingScreen>
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
+                    // App logo with shadow
                     Container(
                       width: 120,
                       height: 120,
                       decoration: BoxDecoration(
-                        color: Colors.white,
                         borderRadius: BorderRadius.circular(24),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 20,
-                            offset: const Offset(0, 10),
+                            color: Colors.black.withOpacity(0.3),
+                            blurRadius: 30,
+                            spreadRadius: 2,
+                            offset: const Offset(0, 15),
+                          ),
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.2),
+                            blurRadius: 15,
+                            spreadRadius: 1,
+                            offset: const Offset(0, 8),
                           ),
                         ],
                       ),
-                      child: const Icon(
-                        Icons.account_balance_wallet,
-                        size: 60,
-                        color: Color(0xFF6366F1),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(24),
+                        child: Image.asset(
+                          'assets/logo/app_logo.png',
+                          fit: BoxFit.cover,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 24),
                     const Text(
-                      'Expense Tracker',
+                      'Wallet Flow',
                       style: TextStyle(
                         fontSize: 28,
                         fontWeight: FontWeight.bold,

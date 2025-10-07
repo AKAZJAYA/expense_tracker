@@ -3,16 +3,16 @@ import 'package:flutter/cupertino.dart';
 import 'screens/loading_screen.dart';
 
 void main() {
-  runApp(const ExpenseTrackerApp());
+  runApp(const WalletFlowApp());
 }
 
-class ExpenseTrackerApp extends StatelessWidget {
-  const ExpenseTrackerApp({super.key});
+class WalletFlowApp extends StatelessWidget {
+  const WalletFlowApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Expense Tracker',
+      title: 'WalletFlow',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
