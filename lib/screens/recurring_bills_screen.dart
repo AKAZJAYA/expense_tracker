@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../models/recurring_bill.dart';
 import '../models/category.dart';
 import '../services/database_service.dart';
+import '../services/recurring_bills_processor.dart';
 
 class RecurringBillsScreen extends StatefulWidget {
   const RecurringBillsScreen({super.key});
@@ -16,11 +17,13 @@ class _RecurringBillsScreenState extends State<RecurringBillsScreen> {
   List<RecurringBill> _bills = [];
   Map<int, Category> _categories = {};
   bool _isLoading = true;
+  bool _isProcessing = false;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    _checkAndProcessDueBills();
   }
 
   Future<void> _loadData() async {
@@ -36,11 +39,151 @@ class _RecurringBillsScreenState extends State<RecurringBillsScreen> {
     });
   }
 
+  Future<void> _checkAndProcessDueBills() async {
+    final processor = RecurringBillsProcessor.instance;
+    final hasDue = await processor.hasDueBills();
+
+    if (hasDue && mounted) {
+      final count = await processor.getDueBillsCount();
+      _showProcessBillsDialog(count);
+    }
+  }
+
+  Future<void> _showProcessBillsDialog(int count) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Process Due Bills'),
+        content: Text(
+          'You have $count recurring bill${count == 1 ? '' : 's'} due. Would you like to process ${count == 1 ? 'it' : 'them'} now?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Later'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Process Now'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _processAllDueBills();
+    }
+  }
+
+  Future<void> _processAllDueBills() async {
+    setState(() => _isProcessing = true);
+
+    try {
+      final processor = RecurringBillsProcessor.instance;
+      final processedBills = await processor.processDueBills();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Processed ${processedBills.length} recurring bill${processedBills.length == 1 ? '' : 's'}',
+            ),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        _loadData();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error processing bills: $e')),
+        );
+      }
+    } finally {
+      setState(() => _isProcessing = false);
+    }
+  }
+
+  Future<void> _processSpecificBill(RecurringBill bill) async {
+    final confirmed = await showCupertinoDialog<bool>(
+      context: context,
+      builder: (context) => CupertinoAlertDialog(
+        title: const Text('Process Bill Now'),
+        content: Text(
+          'Create a transaction for "${bill.name}" (${NumberFormat.currency(symbol: '\$').format(bill.amount)})?',
+        ),
+        actions: [
+          CupertinoDialogAction(
+            child: const Text('Cancel'),
+            onPressed: () => Navigator.pop(context, false),
+          ),
+          CupertinoDialogAction(
+            isDefaultAction: true,
+            child: const Text('Process'),
+            onPressed: () => Navigator.pop(context, true),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      setState(() => _isProcessing = true);
+
+      try {
+        final processor = RecurringBillsProcessor.instance;
+        final success = await processor.processSpecificBill(bill);
+
+        if (mounted) {
+          if (success) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Transaction created for ${bill.name}'),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+            _loadData();
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Bill has ended and cannot be processed'),
+              ),
+            );
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error processing bill: $e')),
+          );
+        }
+      } finally {
+        setState(() => _isProcessing = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Recurring Bills'),
+        actions: [
+          if (_bills.isNotEmpty)
+            IconButton(
+              icon: _isProcessing
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.sync),
+              onPressed: _isProcessing ? null : _processAllDueBills,
+              tooltip: 'Process Due Bills',
+            ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CupertinoActivityIndicator())
@@ -92,6 +235,10 @@ class _RecurringBillsScreenState extends State<RecurringBillsScreen> {
   }
 
   Widget _buildBillCard(RecurringBill bill, Category? category) {
+    final processor = RecurringBillsProcessor.instance;
+    final dueDescription = processor.getNextDueDescription(bill);
+    final isOverdue = dueDescription.startsWith('Overdue');
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: ListTile(
@@ -100,24 +247,80 @@ class _RecurringBillsScreenState extends State<RecurringBillsScreen> {
           child: Icon(category?.icon ?? Icons.help_outline, color: category?.color),
         ),
         title: Text(bill.name),
-        subtitle: Text(
-          '${category?.name ?? 'Unknown'}\n${_capitalizeFirst(bill.frequency)} • Started ${DateFormat.yMMMd().format(bill.startDate)}',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        isThreeLine: true,
-        trailing: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.end,
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              NumberFormat.currency(symbol: '\$').format(bill.amount),
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+              '${category?.name ?? 'Unknown'} • ${_capitalizeFirst(bill.frequency)}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: isOverdue ? Colors.red.withOpacity(0.1) : Colors.blue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                dueDescription,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: isOverdue ? Colors.red : Colors.blue,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
             ),
           ],
         ),
-        onLongPress: () => _deleteBill(bill),
+        isThreeLine: true,
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  NumberFormat.currency(symbol: '\$').format(bill.amount),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+              ],
+            ),
+            PopupMenuButton<String>(
+              onSelected: (value) {
+                if (value == 'process') {
+                  _processSpecificBill(bill);
+                } else if (value == 'delete') {
+                  _deleteBill(bill);
+                }
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'process',
+                  child: Row(
+                    children: [
+                      Icon(Icons.payment, size: 20),
+                      SizedBox(width: 8),
+                      Text('Process Now'),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'delete',
+                  child: Row(
+                    children: [
+                      Icon(Icons.delete_outline, size: 20, color: Colors.red),
+                      SizedBox(width: 8),
+                      Text('Delete', style: TextStyle(color: Colors.red)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -127,6 +330,7 @@ class _RecurringBillsScreenState extends State<RecurringBillsScreen> {
     return text[0].toUpperCase() + text.substring(1);
   }
 
+  // ...existing code for _showAddBillDialog and _deleteBill...
   Future<void> _showAddBillDialog() async {
     final categories = await DatabaseService.instance.getCategories(type: 'expense');
     if (!mounted) return;
