@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'screens/loading_screen.dart';
+import 'services/budget_monitor_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize budget monitoring
+  await BudgetMonitorService.instance.initialize();
+  
   runApp(const WalletFlowApp());
 }
 

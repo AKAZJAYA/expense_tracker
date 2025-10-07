@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:intl/intl.dart';
+import 'dart:async';
 import '../models/budget.dart';
 import '../models/category.dart';
 import '../services/database_service.dart';
+import '../services/budget_monitor_service.dart';
 
 class BudgetsScreen extends StatefulWidget {
   const BudgetsScreen({super.key});
@@ -16,28 +18,84 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
   List<Budget> _budgets = [];
   Map<int, Category> _categories = {};
   Map<int, double> _spending = {};
+  Map<int, BudgetAlert?> _alerts = {};
   bool _isLoading = true;
+
+  // Search properties
+  final TextEditingController _searchController = TextEditingController();
+  Timer? _debounceTimer;
+  String _searchQuery = '';
+  bool _isSearching = false;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    _searchController.addListener(_onSearchChanged);
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _debounceTimer?.cancel();
+    super.dispose();
+  }
+
+  void _onSearchChanged() {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 500), () {
+      setState(() {
+        _searchQuery = _searchController.text.toLowerCase();
+      });
+    });
+  }
+
+  List<Budget> get _filteredBudgets {
+    if (_searchQuery.isEmpty) {
+      return _budgets;
+    }
+
+    return _budgets.where((budget) {
+      final category = _categories[budget.categoryId];
+      final categoryName = category?.name.toLowerCase() ?? '';
+      final period = budget.period.toLowerCase();
+
+      return categoryName.contains(_searchQuery) ||
+          period.contains(_searchQuery);
+    }).toList();
   }
 
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
-    
+
     try {
       final db = DatabaseService.instance;
       final budgets = await db.getBudgets();
       final categories = await db.getCategories();
-      
+
       Map<int, double> spending = {};
+      Map<int, BudgetAlert?> alerts = {};
+
       for (var budget in budgets) {
         final startDate = budget.startDate;
         final endDate = budget.endDate ?? DateTime.now();
-        final total = await db.getTotalByCategory(budget.categoryId, startDate, endDate);
+        final total =
+            await db.getTotalByCategory(budget.categoryId, startDate, endDate);
         spending[budget.categoryId] = total;
+
+        // Check alert status
+        final allAlerts = await BudgetMonitorService.instance.checkBudgets();
+        alerts[budget.id ?? 0] = allAlerts.firstWhere(
+          (a) => a.budget.id == budget.id,
+          orElse: () => BudgetAlert(
+            budget: budget,
+            category: null,
+            spent: 0,
+            percentage: 0,
+            level: AlertLevel.warning,
+            message: '',
+          ),
+        );
       }
 
       if (mounted) {
@@ -45,6 +103,7 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
           _budgets = budgets;
           _categories = {for (var cat in categories) cat.id!: cat};
           _spending = spending;
+          _alerts = alerts;
           _isLoading = false;
         });
       }
@@ -62,17 +121,42 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Budgets'),
+        title: _isSearching
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'Search budgets...',
+                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.7)),
+                  border: InputBorder.none,
+                ),
+              )
+            : const Text('Budgets'),
+        actions: [
+          IconButton(
+            icon: Icon(_isSearching ? Icons.close : Icons.search),
+            onPressed: () {
+              setState(() {
+                _isSearching = !_isSearching;
+                if (!_isSearching) {
+                  _searchController.clear();
+                  _searchQuery = '';
+                }
+              });
+            },
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CupertinoActivityIndicator())
-          : _budgets.isEmpty
+          : _filteredBudgets.isEmpty
               ? _buildEmptyState()
               : ListView.builder(
                   padding: const EdgeInsets.all(16),
-                  itemCount: _budgets.length,
+                  itemCount: _filteredBudgets.length,
                   itemBuilder: (context, index) {
-                    final budget = _budgets[index];
+                    final budget = _filteredBudgets[index];
                     final category = _categories[budget.categoryId];
                     final spent = _spending[budget.categoryId] ?? 0.0;
                     return _buildBudgetCard(budget, category, spent);
@@ -91,24 +175,37 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
-            Icons.savings_outlined,
+            _searchQuery.isEmpty ? Icons.savings_outlined : Icons.search_off,
             size: 64,
             color: Colors.grey[400],
           ),
           const SizedBox(height: 16),
           Text(
-            'No budgets yet',
+            _searchQuery.isEmpty ? 'No budgets yet' : 'No results found',
             style: Theme.of(context).textTheme.titleLarge?.copyWith(
                   color: Colors.grey[600],
                 ),
           ),
           const SizedBox(height: 8),
           Text(
-            'Create a budget to track your spending',
+            _searchQuery.isEmpty
+                ? 'Create a budget to track your spending'
+                : 'Try adjusting your search terms',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: Colors.grey[500],
                 ),
           ),
+          if (_searchQuery.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            TextButton.icon(
+              onPressed: () {
+                _searchController.clear();
+                setState(() => _searchQuery = '');
+              },
+              icon: const Icon(Icons.clear),
+              label: const Text('Clear search'),
+            ),
+          ],
         ],
       ),
     );
@@ -117,6 +214,8 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
   Widget _buildBudgetCard(Budget budget, Category? category, double spent) {
     final percentage = (spent / budget.amount * 100).clamp(0, 100);
     final isOverBudget = spent > budget.amount;
+    final alert = _alerts[budget.id];
+    final hasAlert = alert != null && alert.percentage >= 80;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -127,9 +226,29 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
           children: [
             Row(
               children: [
-                CircleAvatar(
-                  backgroundColor: category?.color.withOpacity(0.2),
-                  child: Icon(category?.icon ?? Icons.help_outline, color: category?.color),
+                Stack(
+                  children: [
+                    CircleAvatar(
+                      backgroundColor: category?.color.withOpacity(0.2),
+                      child: Icon(category?.icon ?? Icons.help_outline,
+                          color: category?.color),
+                    ),
+                    if (hasAlert)
+                      Positioned(
+                        right: 0,
+                        top: 0,
+                        child: Container(
+                          width: 12,
+                          height: 12,
+                          decoration: BoxDecoration(
+                            color: BudgetMonitorService.instance
+                                .getAlertColor(alert.level),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 2),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -138,9 +257,10 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                     children: [
                       Text(
                         category?.name ?? 'Unknown',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
+                        style:
+                            Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
                       ),
                       Text(
                         budget.period,
@@ -149,12 +269,71 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                     ],
                   ),
                 ),
+                if (hasAlert)
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: BudgetMonitorService.instance
+                          .getAlertColor(alert.level)
+                          .withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '${alert.percentage}%',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: BudgetMonitorService.instance
+                            .getAlertColor(alert.level),
+                      ),
+                    ),
+                  ),
                 IconButton(
                   icon: const Icon(Icons.delete_outline),
                   onPressed: () => _deleteBudget(budget),
                 ),
               ],
             ),
+            if (hasAlert) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: BudgetMonitorService.instance
+                      .getAlertColor(alert.level)
+                      .withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: BudgetMonitorService.instance
+                        .getAlertColor(alert.level)
+                        .withOpacity(0.3),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.warning_amber_rounded,
+                      color: BudgetMonitorService.instance
+                          .getAlertColor(alert.level),
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        alert.message,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: BudgetMonitorService.instance
+                              .getAlertColor(alert.level),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -179,16 +358,27 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                 minHeight: 8,
                 backgroundColor: Colors.grey[200],
                 valueColor: AlwaysStoppedAnimation<Color>(
-                  isOverBudget ? Colors.red : (percentage > 80 ? Colors.orange : Colors.green),
+                  isOverBudget
+                      ? Colors.red
+                      : (percentage > 80 ? Colors.orange : Colors.green),
                 ),
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              '${percentage.toStringAsFixed(0)}% used',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: isOverBudget ? Colors.red : null,
-                  ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '${percentage.toStringAsFixed(1)}% used',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w500,
+                      ),
+                ),
+                Text(
+                  '${NumberFormat.currency(symbol: '\$').format(budget.amount - spent)} remaining',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
             ),
           ],
         ),
@@ -197,9 +387,10 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
   }
 
   Future<void> _showAddBudgetDialog() async {
-    final categories = await DatabaseService.instance.getCategories(type: 'expense');
+    final categories =
+        await DatabaseService.instance.getCategories(type: 'expense');
     if (!mounted) return;
-    
+
     if (categories.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No expense categories available')),
@@ -242,7 +433,8 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                 const SizedBox(height: 16),
                 TextField(
                   controller: amountController,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
                   decoration: const InputDecoration(
                     labelText: 'Budget Amount',
                     prefixText: '\$ ',
@@ -278,7 +470,9 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
       ),
     );
 
-    if (result == true && selectedCategoryId != null && amountController.text.isNotEmpty) {
+    if (result == true &&
+        selectedCategoryId != null &&
+        amountController.text.isNotEmpty) {
       try {
         final amount = double.parse(amountController.text);
         final budget = Budget(
@@ -299,7 +493,7 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
         }
       }
     }
-    
+
     amountController.dispose();
   }
 

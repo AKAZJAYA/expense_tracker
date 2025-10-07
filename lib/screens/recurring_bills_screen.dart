@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:intl/intl.dart';
+import 'dart:async';
 import '../models/recurring_bill.dart';
 import '../models/category.dart';
 import '../services/database_service.dart';
@@ -19,11 +20,53 @@ class _RecurringBillsScreenState extends State<RecurringBillsScreen> {
   bool _isLoading = true;
   bool _isProcessing = false;
 
+  // Search properties
+  final TextEditingController _searchController = TextEditingController();
+  Timer? _debounceTimer;
+  String _searchQuery = '';
+  bool _isSearching = false;
+
   @override
   void initState() {
     super.initState();
     _loadData();
     _checkAndProcessDueBills();
+    _searchController.addListener(_onSearchChanged);
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _debounceTimer?.cancel();
+    super.dispose();
+  }
+
+  void _onSearchChanged() {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 500), () {
+      setState(() {
+        _searchQuery = _searchController.text.toLowerCase();
+      });
+    });
+  }
+
+  List<RecurringBill> get _filteredBills {
+    if (_searchQuery.isEmpty) {
+      return _bills;
+    }
+
+    return _bills.where((bill) {
+      final billName = bill.name.toLowerCase();
+      final category = _categories[bill.categoryId];
+      final categoryName = category?.name.toLowerCase() ?? '';
+      final frequency = bill.frequency.toLowerCase();
+      final amount = bill.amount.toString();
+
+      return billName.contains(_searchQuery) ||
+          categoryName.contains(_searchQuery) ||
+          frequency.contains(_searchQuery) ||
+          amount.contains(_searchQuery);
+    }).toList();
   }
 
   Future<void> _loadData() async {
@@ -31,7 +74,7 @@ class _RecurringBillsScreenState extends State<RecurringBillsScreen> {
     final db = DatabaseService.instance;
     final bills = await db.getRecurringBills();
     final categories = await db.getCategories();
-    
+
     setState(() {
       _bills = bills;
       _categories = {for (var cat in categories) cat.id!: cat};
@@ -166,9 +209,32 @@ class _RecurringBillsScreenState extends State<RecurringBillsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Recurring Bills'),
+        title: _isSearching
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'Search bills...',
+                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.7)),
+                  border: InputBorder.none,
+                ),
+              )
+            : const Text('Recurring Bills'),
         actions: [
-          if (_bills.isNotEmpty)
+          IconButton(
+            icon: Icon(_isSearching ? Icons.close : Icons.search),
+            onPressed: () {
+              setState(() {
+                _isSearching = !_isSearching;
+                if (!_isSearching) {
+                  _searchController.clear();
+                  _searchQuery = '';
+                }
+              });
+            },
+          ),
+          if (_filteredBills.isNotEmpty && !_isSearching)
             IconButton(
               icon: _isProcessing
                   ? const SizedBox(
@@ -187,13 +253,13 @@ class _RecurringBillsScreenState extends State<RecurringBillsScreen> {
       ),
       body: _isLoading
           ? const Center(child: CupertinoActivityIndicator())
-          : _bills.isEmpty
+          : _filteredBills.isEmpty
               ? _buildEmptyState()
               : ListView.builder(
                   padding: const EdgeInsets.all(16),
-                  itemCount: _bills.length,
+                  itemCount: _filteredBills.length,
                   itemBuilder: (context, index) {
-                    final bill = _bills[index];
+                    final bill = _filteredBills[index];
                     final category = _categories[bill.categoryId];
                     return _buildBillCard(bill, category);
                   },
@@ -211,24 +277,37 @@ class _RecurringBillsScreenState extends State<RecurringBillsScreen> {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
-            Icons.repeat_outlined,
+            _searchQuery.isEmpty ? Icons.repeat_outlined : Icons.search_off,
             size: 64,
             color: Colors.grey[400],
           ),
           const SizedBox(height: 16),
           Text(
-            'No recurring bills',
+            _searchQuery.isEmpty ? 'No recurring bills' : 'No results found',
             style: Theme.of(context).textTheme.titleLarge?.copyWith(
                   color: Colors.grey[600],
                 ),
           ),
           const SizedBox(height: 8),
           Text(
-            'Add bills that repeat regularly',
+            _searchQuery.isEmpty
+                ? 'Add bills that repeat regularly'
+                : 'Try adjusting your search terms',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: Colors.grey[500],
                 ),
           ),
+          if (_searchQuery.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            TextButton.icon(
+              onPressed: () {
+                _searchController.clear();
+                setState(() => _searchQuery = '');
+              },
+              icon: const Icon(Icons.clear),
+              label: const Text('Clear search'),
+            ),
+          ],
         ],
       ),
     );
@@ -244,7 +323,8 @@ class _RecurringBillsScreenState extends State<RecurringBillsScreen> {
       child: ListTile(
         leading: CircleAvatar(
           backgroundColor: category?.color.withOpacity(0.2),
-          child: Icon(category?.icon ?? Icons.help_outline, color: category?.color),
+          child: Icon(category?.icon ?? Icons.help_outline,
+              color: category?.color),
         ),
         title: Text(bill.name),
         subtitle: Column(
@@ -258,7 +338,9 @@ class _RecurringBillsScreenState extends State<RecurringBillsScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: isOverdue ? Colors.red.withOpacity(0.1) : Colors.blue.withOpacity(0.1),
+                color: isOverdue
+                    ? Colors.red.withOpacity(0.1)
+                    : Colors.blue.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
@@ -330,11 +412,11 @@ class _RecurringBillsScreenState extends State<RecurringBillsScreen> {
     return text[0].toUpperCase() + text.substring(1);
   }
 
-  // ...existing code for _showAddBillDialog and _deleteBill...
   Future<void> _showAddBillDialog() async {
-    final categories = await DatabaseService.instance.getCategories(type: 'expense');
+    final categories =
+        await DatabaseService.instance.getCategories(type: 'expense');
     if (!mounted) return;
-    
+
     if (categories.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No expense categories available')),
@@ -364,7 +446,8 @@ class _RecurringBillsScreenState extends State<RecurringBillsScreen> {
                 const SizedBox(height: 16),
                 TextField(
                   controller: amountController,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
                   decoration: const InputDecoration(
                     labelText: 'Amount',
                     prefixText: '\$ ',
@@ -396,9 +479,11 @@ class _RecurringBillsScreenState extends State<RecurringBillsScreen> {
                   decoration: const InputDecoration(labelText: 'Frequency'),
                   items: const [
                     DropdownMenuItem(value: 'weekly', child: Text('Weekly')),
-                    DropdownMenuItem(value: 'biweekly', child: Text('Bi-weekly')),
+                    DropdownMenuItem(
+                        value: 'biweekly', child: Text('Bi-weekly')),
                     DropdownMenuItem(value: 'monthly', child: Text('Monthly')),
-                    DropdownMenuItem(value: 'quarterly', child: Text('Quarterly')),
+                    DropdownMenuItem(
+                        value: 'quarterly', child: Text('Quarterly')),
                     DropdownMenuItem(value: 'yearly', child: Text('Yearly')),
                   ],
                   onChanged: (value) {
@@ -415,7 +500,8 @@ class _RecurringBillsScreenState extends State<RecurringBillsScreen> {
             ),
             FilledButton(
               onPressed: () {
-                if (nameController.text.isEmpty || amountController.text.isEmpty) {
+                if (nameController.text.isEmpty ||
+                    amountController.text.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Please fill all fields')),
                   );
@@ -430,8 +516,10 @@ class _RecurringBillsScreenState extends State<RecurringBillsScreen> {
       ),
     );
 
-    if (result == true && selectedCategoryId != null && 
-        nameController.text.isNotEmpty && amountController.text.isNotEmpty) {
+    if (result == true &&
+        selectedCategoryId != null &&
+        nameController.text.isNotEmpty &&
+        amountController.text.isNotEmpty) {
       final amount = double.tryParse(amountController.text);
       if (amount == null || amount <= 0) {
         if (!mounted) return;
@@ -459,7 +547,8 @@ class _RecurringBillsScreenState extends State<RecurringBillsScreen> {
       context: context,
       builder: (context) => CupertinoAlertDialog(
         title: const Text('Delete Bill'),
-        content: const Text('Are you sure you want to delete this recurring bill?'),
+        content:
+            const Text('Are you sure you want to delete this recurring bill?'),
         actions: [
           CupertinoDialogAction(
             child: const Text('Cancel'),

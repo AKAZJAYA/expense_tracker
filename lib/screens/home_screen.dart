@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'transactions_screen.dart';
 import 'budgets_screen.dart';
 import 'statistics_screen.dart';
+import 'reports_screen.dart';
 import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -16,7 +17,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   final List<Widget> _screens = [
     const TransactionsScreen(),
-    const StatisticsScreen(),
+    // const StatisticsScreen(),
+    const ReportsScreen(),
     const BudgetsScreen(),
     const SettingsScreen(),
   ];
@@ -40,9 +42,13 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: Icon(Icons.receipt_long),
             label: 'Transactions',
           ),
+          // BottomNavigationBarItem(
+          //   icon: Icon(Icons.pie_chart),
+          //   label: 'Statistics',
+          // ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.pie_chart),
-            label: 'Statistics',
+            icon: Icon(Icons.analytics),
+            label: 'Reports',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.account_balance_wallet),

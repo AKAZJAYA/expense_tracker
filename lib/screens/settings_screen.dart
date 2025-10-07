@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../services/database_service.dart';
 import '../services/export_service.dart';
 import 'categories_screen.dart';
+import 'recurring_bills_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -19,6 +20,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _selectedTheme = 'Light';
   bool _isLoading = false;
 
+  // Add these to the class variables
+  bool _budgetAlertsEnabled = true;
+  String _alertFrequency = 'immediate';
+  int _threshold80 = 80;
+  int _threshold100 = 100;
+  int _threshold120 = 120;
+
   @override
   void initState() {
     super.initState();
@@ -31,6 +39,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _carryOverEnabled = prefs.getBool('carry_over_enabled') ?? false;
       _notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
       _selectedTheme = prefs.getString('theme') ?? 'Light';
+      _budgetAlertsEnabled = prefs.getBool('budget_alerts_enabled') ?? true;
+      _alertFrequency = prefs.getString('alert_frequency') ?? 'immediate';
+      _threshold80 = prefs.getInt('alert_threshold_80') ?? 80;
+      _threshold100 = prefs.getInt('alert_threshold_100') ?? 100;
+      _threshold120 = prefs.getInt('alert_threshold_120') ?? 120;
     });
   }
 
@@ -248,7 +261,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     // Show progress dialog
     if (!mounted) return;
-    
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -278,8 +291,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   Text('✅ Imported: ${result.imported} transactions'),
                   if (result.skipped > 0)
                     Text('⏭️ Skipped: ${result.skipped} (duplicates)'),
-                  if (result.errors > 0)
-                    Text('❌ Errors: ${result.errors}'),
+                  if (result.errors > 0) Text('❌ Errors: ${result.errors}'),
                 ] else
                   Text(result.message),
               ],
@@ -324,7 +336,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       // Show backup selection dialog
       if (!mounted) return;
-      
+
       final selectedBackup = await showDialog<BackupFile>(
         context: context,
         builder: (context) => AlertDialog(
@@ -361,7 +373,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       // Show restore options dialog
       if (!mounted) return;
-      
+
       final clearExisting = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
@@ -387,7 +399,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       // Show progress dialog
       if (!mounted) return;
-      
+
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -418,8 +430,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   Text('✅ Restored: ${result.imported} transactions'),
                   if (result.skipped > 0 && !clearExisting)
                     Text('⏭️ Skipped: ${result.skipped} (duplicates)'),
-                  if (result.errors > 0)
-                    Text('❌ Errors: ${result.errors}'),
+                  if (result.errors > 0) Text('❌ Errors: ${result.errors}'),
                 ] else
                   Text(result.message),
               ],
@@ -560,6 +571,148 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Future<void> _showBudgetAlertsDialog() async {
+    final prefs = await SharedPreferences.getInstance();
+    
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Budget Alert Settings'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Enable Budget Alerts'),
+                  value: _budgetAlertsEnabled,
+                  onChanged: (value) async {
+                    await prefs.setBool('budget_alerts_enabled', value);
+                    setDialogState(() => _budgetAlertsEnabled = value);
+                    setState(() {});
+                  },
+                ),
+                const Divider(),
+                const Text(
+                  'Alert Frequency',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                RadioListTile<String>(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Immediate'),
+                  subtitle: const Text('Alert as soon as threshold is reached'),
+                  value: 'immediate',
+                  groupValue: _alertFrequency,
+                  onChanged: (value) async {
+                    await prefs.setString('alert_frequency', value!);
+                    setDialogState(() => _alertFrequency = value);
+                    setState(() {});
+                  },
+                ),
+                RadioListTile<String>(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Daily Summary'),
+                  subtitle: const Text('One notification per day'),
+                  value: 'daily',
+                  groupValue: _alertFrequency,
+                  onChanged: (value) async {
+                    await prefs.setString('alert_frequency', value!);
+                    setDialogState(() => _alertFrequency = value);
+                    setState(() {});
+                  },
+                ),
+                RadioListTile<String>(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Weekly Summary'),
+                  subtitle: const Text('One notification per week'),
+                  value: 'weekly',
+                  groupValue: _alertFrequency,
+                  onChanged: (value) async {
+                    await prefs.setString('alert_frequency', value!);
+                    setDialogState(() => _alertFrequency = value);
+                    setState(() {});
+                  },
+                ),
+                const Divider(),
+                const Text(
+                  'Alert Thresholds (%)',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                _buildThresholdSlider(
+                  'Warning',
+                  _threshold80,
+                  Colors.orange,
+                  (value) async {
+                    await prefs.setInt('alert_threshold_80', value);
+                    setDialogState(() => _threshold80 = value);
+                    setState(() {});
+                  },
+                ),
+                _buildThresholdSlider(
+                  'Danger',
+                  _threshold100,
+                  Colors.red,
+                  (value) async {
+                    await prefs.setInt('alert_threshold_100', value);
+                    setDialogState(() => _threshold100 = value);
+                    setState(() {});
+                  },
+                ),
+                _buildThresholdSlider(
+                  'Critical',
+                  _threshold120,
+                  Colors.red.shade900,
+                  (value) async {
+                    await prefs.setInt('alert_threshold_120', value);
+                    setDialogState(() => _threshold120 = value);
+                    setState(() {});
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildThresholdSlider(
+    String label,
+    int value,
+    Color color,
+    Function(int) onChanged,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label),
+            Text('$value%', style: TextStyle(fontWeight: FontWeight.bold, color: color)),
+          ],
+        ),
+        Slider(
+          value: value.toDouble(),
+          min: 50,
+          max: 150,
+          divisions: 20,
+          activeColor: color,
+          onChanged: (val) => onChanged(val.round()),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -622,10 +775,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 },
               ),
               _buildSettingsTile(
+                icon: Icons.repeat_outlined,
+                title: 'Recurring Bills',
+                subtitle: 'Manage recurring payments',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const RecurringBillsScreen(),
+                    ),
+                  );
+                },
+              ),
+              _buildSettingsTile(
                 icon: Icons.notifications_outlined,
                 title: 'Notifications',
                 subtitle: _notificationsEnabled ? 'Enabled' : 'Disabled',
                 onTap: _showNotificationsDialog,
+              ),
+              _buildSettingsTile(
+                icon: Icons.notification_important_outlined,
+                title: 'Budget Alerts',
+                subtitle: _budgetAlertsEnabled ? 'Enabled' : 'Disabled',
+                onTap: _showBudgetAlertsDialog,
               ),
             ],
           ),
