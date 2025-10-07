@@ -2,13 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async';
 import '../models/transaction.dart';
 import '../models/category.dart';
 import '../services/database_service.dart';
 import '../services/export_service.dart';
 import 'add_transaction_screen.dart';
 import 'edit_transaction_screen.dart';
-import 'view_transaction_screen.dart'; // Add this import
+import 'view_transaction_screen.dart';
 
 class TransactionsScreen extends StatefulWidget {
   const TransactionsScreen({super.key});
@@ -29,18 +30,33 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   bool _carryOverEnabled = false;
   double _carriedOverAmount = 0.0;
 
+  // Search and filter properties
+  final TextEditingController _searchController = TextEditingController();
+  Timer? _debounceTimer;
+  String _searchQuery = '';
+  Set<int> _selectedCategoryIds = {};
+  double? _minAmount;
+  double? _maxAmount;
+  DateTime? _customStartDate;
+  DateTime? _customEndDate;
+  String _sortBy = 'date_desc'; // date_desc, date_asc, amount_desc, amount_asc
+  bool _isSearching = false;
+
   @override
   void initState() {
     super.initState();
     _loadSettings();
     _loadData();
     _scrollController.addListener(_onScroll);
+    _searchController.addListener(_onSearchChanged);
   }
 
   @override
   void dispose() {
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    _searchController.dispose();
+    _debounceTimer?.cancel();
     super.dispose();
   }
 
@@ -59,6 +75,15 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
         _headerOpacity = newOpacity;
       });
     }
+  }
+
+  void _onSearchChanged() {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 500), () {
+      setState(() {
+        _searchQuery = _searchController.text.toLowerCase();
+      });
+    });
   }
 
   Future<void> _loadData() async {
@@ -177,37 +202,123 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   }
 
   List<Transaction> get _filteredTransactions {
-    if (_filterType == 'all') return _dayTransactions;
-    return _dayTransactions.where((t) => t.type == _filterType).toList();
+    List<Transaction> filtered = _dayTransactions;
+
+    // Apply type filter
+    if (_filterType != 'all') {
+      filtered = filtered.where((t) => t.type == _filterType).toList();
+    }
+
+    // Apply search filter
+    if (_searchQuery.isNotEmpty) {
+      filtered = filtered.where((transaction) {
+        final category = _categories[transaction.categoryId];
+        final categoryName = category?.name.toLowerCase() ?? '';
+        final notes = transaction.notes?.toLowerCase() ?? '';
+        final amount = transaction.amount.toString();
+
+        return categoryName.contains(_searchQuery) ||
+            notes.contains(_searchQuery) ||
+            amount.contains(_searchQuery);
+      }).toList();
+    }
+
+    // Apply category filter
+    if (_selectedCategoryIds.isNotEmpty) {
+      filtered = filtered
+          .where((t) => _selectedCategoryIds.contains(t.categoryId))
+          .toList();
+    }
+
+    // Apply amount range filter
+    if (_minAmount != null) {
+      filtered = filtered.where((t) => t.amount >= _minAmount!).toList();
+    }
+    if (_maxAmount != null) {
+      filtered = filtered.where((t) => t.amount <= _maxAmount!).toList();
+    }
+
+    // Apply custom date range filter
+    if (_customStartDate != null && _customEndDate != null) {
+      filtered = filtered.where((t) {
+        return t.date
+                .isAfter(_customStartDate!.subtract(const Duration(days: 1))) &&
+            t.date.isBefore(_customEndDate!.add(const Duration(days: 1)));
+      }).toList();
+    }
+
+    // Apply sorting
+    switch (_sortBy) {
+      case 'date_desc':
+        filtered.sort((a, b) => b.date.compareTo(a.date));
+        break;
+      case 'date_asc':
+        filtered.sort((a, b) => a.date.compareTo(b.date));
+        break;
+      case 'amount_desc':
+        filtered.sort((a, b) => b.amount.compareTo(a.amount));
+        break;
+      case 'amount_asc':
+        filtered.sort((a, b) => a.amount.compareTo(b.amount));
+        break;
+    }
+
+    return filtered;
+  }
+
+  bool get _hasActiveFilters {
+    return _searchQuery.isNotEmpty ||
+        _selectedCategoryIds.isNotEmpty ||
+        _minAmount != null ||
+        _maxAmount != null ||
+        _customStartDate != null ||
+        _customEndDate != null ||
+        _sortBy != 'date_desc';
+  }
+
+  void _clearAllFilters() {
+    setState(() {
+      _searchController.clear();
+      _searchQuery = '';
+      _selectedCategoryIds.clear();
+      _minAmount = null;
+      _maxAmount = null;
+      _customStartDate = null;
+      _customEndDate = null;
+      _sortBy = 'date_desc';
+    });
   }
 
   Future<void> _exportTransactions() async {
     // Show date range selection dialog
     final dateRange = await _showExportRangeDialog();
-    
+
     if (dateRange == null) return; // User cancelled
-    
+
     try {
       // Filter transactions by selected date range
       final transactionsToExport = _allTransactions.where((transaction) {
         return transaction.date.isAfter(dateRange['start']!) &&
-               transaction.date.isBefore(dateRange['end']!.add(const Duration(days: 1)));
+            transaction.date
+                .isBefore(dateRange['end']!.add(const Duration(days: 1)));
       }).toList();
-      
+
       if (transactionsToExport.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No transactions found in selected range')),
+            const SnackBar(
+                content: Text('No transactions found in selected range')),
           );
         }
         return;
       }
-      
+
       final path = await ExportService.exportToCSV(transactionsToExport);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Exported ${transactionsToExport.length} transactions to: $path'),
+            content: Text(
+                'Exported ${transactionsToExport.length} transactions to: $path'),
             duration: const Duration(seconds: 3),
           ),
         );
@@ -225,7 +336,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     String selectedRange = 'day';
     DateTime? customStartDate;
     DateTime? customEndDate;
-    
+
     return await showDialog<Map<String, DateTime>>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -343,7 +454,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                     customStartDate,
                     customEndDate,
                   );
-                  
+
                   if (result == null && selectedRange == 'custom') {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
@@ -353,7 +464,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                     );
                     return;
                   }
-                  
+
                   Navigator.pop(context, result);
                 },
                 child: const Text('Export'),
@@ -388,7 +499,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   ) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    
+
     switch (range) {
       case 'day':
         return {
@@ -444,6 +555,472 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     return IconData(category!.iconCodePoint!, fontFamily: 'MaterialIcons');
   }
 
+  void _showAdvancedFilters() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _buildAdvancedFiltersSheet(),
+    );
+  }
+
+  Widget _buildAdvancedFiltersSheet() {
+    return StatefulBuilder(
+      builder: (context, setModalState) {
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.85,
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              // Header
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).primaryColor,
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(20)),
+                ),
+                child: Row(
+                  children: [
+                    const Text(
+                      'Advanced Filters',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const Spacer(),
+                    TextButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _clearAllFilters();
+                        });
+                        setModalState(() {});
+                      },
+                      icon: const Icon(Icons.clear_all, color: Colors.white),
+                      label: const Text(
+                        'Clear All',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    // Category Filter
+                    _buildFilterSection(
+                      title: 'Categories',
+                      icon: Icons.category_outlined,
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _categories.values.map((category) {
+                          final isSelected =
+                              _selectedCategoryIds.contains(category.id);
+                          return FilterChip(
+                            selected: isSelected,
+                            label: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  _getCategoryIcon(category),
+                                  size: 16,
+                                  color: _getCategoryColor(category),
+                                ),
+                                const SizedBox(width: 4),
+                                Text(category.name),
+                              ],
+                            ),
+                            onSelected: (selected) {
+                              setModalState(() {
+                                if (selected) {
+                                  _selectedCategoryIds.add(category.id!);
+                                } else {
+                                  _selectedCategoryIds.remove(category.id!);
+                                }
+                              });
+                              setState(() {});
+                            },
+                            backgroundColor: Colors.grey[100],
+                            selectedColor:
+                                _getCategoryColor(category).withOpacity(0.2),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    // Amount Range Filter
+                    _buildFilterSection(
+                      title: 'Amount Range',
+                      icon: Icons.attach_money,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              decoration: InputDecoration(
+                                labelText: 'Min Amount',
+                                prefixText: '\$ ',
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                      decimal: true),
+                              controller: TextEditingController(
+                                text: _minAmount?.toStringAsFixed(2) ?? '',
+                              ),
+                              onChanged: (value) {
+                                setModalState(() {
+                                  _minAmount = double.tryParse(value);
+                                });
+                                setState(() {});
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: TextField(
+                              decoration: InputDecoration(
+                                labelText: 'Max Amount',
+                                prefixText: '\$ ',
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                      decimal: true),
+                              controller: TextEditingController(
+                                text: _maxAmount?.toStringAsFixed(2) ?? '',
+                              ),
+                              onChanged: (value) {
+                                setModalState(() {
+                                  _maxAmount = double.tryParse(value);
+                                });
+                                setState(() {});
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    // Date Range Filter
+                    _buildFilterSection(
+                      title: 'Custom Date Range',
+                      icon: Icons.date_range,
+                      child: Column(
+                        children: [
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(
+                              _customStartDate == null
+                                  ? 'Start Date'
+                                  : DateFormat('MMM d, yyyy')
+                                      .format(_customStartDate!),
+                            ),
+                            trailing: const Icon(Icons.calendar_today),
+                            onTap: () async {
+                              final date = await showDatePicker(
+                                context: context,
+                                initialDate: _customStartDate ?? DateTime.now(),
+                                firstDate: DateTime(2000),
+                                lastDate: DateTime.now(),
+                              );
+                              if (date != null) {
+                                setModalState(() {
+                                  _customStartDate = date;
+                                });
+                                setState(() {});
+                              }
+                            },
+                          ),
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(
+                              _customEndDate == null
+                                  ? 'End Date'
+                                  : DateFormat('MMM d, yyyy')
+                                      .format(_customEndDate!),
+                            ),
+                            trailing: const Icon(Icons.calendar_today),
+                            onTap: () async {
+                              final date = await showDatePicker(
+                                context: context,
+                                initialDate: _customEndDate ?? DateTime.now(),
+                                firstDate: _customStartDate ?? DateTime(2000),
+                                lastDate: DateTime.now(),
+                              );
+                              if (date != null) {
+                                setModalState(() {
+                                  _customEndDate = date;
+                                });
+                                setState(() {});
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    // Sort Options
+                    _buildFilterSection(
+                      title: 'Sort By',
+                      icon: Icons.sort,
+                      child: Column(
+                        children: [
+                          RadioListTile<String>(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('Date (Newest First)'),
+                            value: 'date_desc',
+                            groupValue: _sortBy,
+                            onChanged: (value) {
+                              setModalState(() {
+                                _sortBy = value!;
+                              });
+                              setState(() {});
+                            },
+                          ),
+                          RadioListTile<String>(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('Date (Oldest First)'),
+                            value: 'date_asc',
+                            groupValue: _sortBy,
+                            onChanged: (value) {
+                              setModalState(() {
+                                _sortBy = value!;
+                              });
+                              setState(() {});
+                            },
+                          ),
+                          RadioListTile<String>(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('Amount (High to Low)'),
+                            value: 'amount_desc',
+                            groupValue: _sortBy,
+                            onChanged: (value) {
+                              setModalState(() {
+                                _sortBy = value!;
+                              });
+                              setState(() {});
+                            },
+                          ),
+                          RadioListTile<String>(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('Amount (Low to High)'),
+                            value: 'amount_asc',
+                            groupValue: _sortBy,
+                            onChanged: (value) {
+                              setModalState(() {
+                                _sortBy = value!;
+                              });
+                              setState(() {});
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Apply Button
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 10,
+                      offset: const Offset(0, -2),
+                    ),
+                  ],
+                ),
+                child: SafeArea(
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Theme.of(context).primaryColor,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.check),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Apply Filters (${_filteredTransactions.length})',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildFilterSection({
+    required String title,
+    required IconData icon,
+    required Widget child,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, color: Theme.of(context).primaryColor, size: 20),
+            const SizedBox(width: 8),
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        child,
+      ],
+    );
+  }
+
+  Widget _buildActiveFiltersChips() {
+    if (!_hasActiveFilters) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text(
+                'Active Filters:',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey,
+                ),
+              ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: _clearAllFilters,
+                icon: const Icon(Icons.clear_all, size: 16),
+                label: const Text('Clear All'),
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(0, 0),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (_searchQuery.isNotEmpty)
+                _buildActiveFilterChip(
+                  'Search: "$_searchQuery"',
+                  () {
+                    _searchController.clear();
+                    setState(() => _searchQuery = '');
+                  },
+                ),
+              if (_selectedCategoryIds.isNotEmpty)
+                _buildActiveFilterChip(
+                  '${_selectedCategoryIds.length} Categories',
+                  () => setState(() => _selectedCategoryIds.clear()),
+                ),
+              if (_minAmount != null)
+                _buildActiveFilterChip(
+                  'Min: \$${_minAmount!.toStringAsFixed(2)}',
+                  () => setState(() => _minAmount = null),
+                ),
+              if (_maxAmount != null)
+                _buildActiveFilterChip(
+                  'Max: \$${_maxAmount!.toStringAsFixed(2)}',
+                  () => setState(() => _maxAmount = null),
+                ),
+              if (_customStartDate != null && _customEndDate != null)
+                _buildActiveFilterChip(
+                  '${DateFormat('MMM d').format(_customStartDate!)} - ${DateFormat('MMM d').format(_customEndDate!)}',
+                  () => setState(() {
+                    _customStartDate = null;
+                    _customEndDate = null;
+                  }),
+                ),
+              if (_sortBy != 'date_desc')
+                _buildActiveFilterChip(
+                  'Sorted: ${_getSortLabel()}',
+                  () => setState(() => _sortBy = 'date_desc'),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getSortLabel() {
+    switch (_sortBy) {
+      case 'date_asc':
+        return 'Date ↑';
+      case 'amount_desc':
+        return 'Amount ↓';
+      case 'amount_asc':
+        return 'Amount ↑';
+      default:
+        return 'Date ↓';
+    }
+  }
+
+  Widget _buildActiveFilterChip(String label, VoidCallback onRemove) {
+    return Chip(
+      label: Text(
+        label,
+        style: const TextStyle(fontSize: 12),
+      ),
+      deleteIcon: const Icon(Icons.close, size: 16),
+      onDeleted: onRemove,
+      backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
+      deleteIconColor: Theme.of(context).primaryColor,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+      visualDensity: VisualDensity.compact,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -495,7 +1072,13 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                 SliverToBoxAdapter(
                   child: Container(
                     color: Theme.of(context).scaffoldBackgroundColor,
-                    child: _buildTransactionsList(),
+                    child: Column(
+                      children: [
+                        _buildSearchBar(),
+                        _buildActiveFiltersChips(),
+                        _buildTransactionsList(),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -512,6 +1095,47 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
         },
         icon: const Icon(Icons.add),
         label: const Text('Add'),
+      ),
+    );
+  }
+
+  Widget _buildSearchBar() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: TextField(
+        controller: _searchController,
+        decoration: InputDecoration(
+          hintText: 'Search by category, notes, or amount...',
+          prefixIcon: const Icon(Icons.search),
+          suffixIcon: _searchQuery.isNotEmpty
+              ? IconButton(
+                  icon: const Icon(Icons.clear),
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() => _searchQuery = '');
+                  },
+                )
+              : null,
+          filled: true,
+          fillColor: Colors.white,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Colors.grey[300]!),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Colors.grey[300]!),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(
+              color: Theme.of(context).primaryColor,
+              width: 2,
+            ),
+          ),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        ),
       ),
     );
   }
@@ -719,6 +1343,14 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
           _buildFilterChip('Expense', 'expense'),
           const Spacer(),
           IconButton(
+            icon: Badge(
+              isLabelVisible: _hasActiveFilters,
+              child: const Icon(Icons.filter_list),
+            ),
+            onPressed: _showAdvancedFilters,
+            tooltip: 'Advanced Filters',
+          ),
+          IconButton(
             icon: const Icon(Icons.file_download_outlined),
             onPressed: _exportTransactions,
             tooltip: 'Export to CSV',
@@ -789,7 +1421,9 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Add your first transaction to get started',
+            _hasActiveFilters
+                ? 'Try adjusting your filters'
+                : 'Add your first transaction to get started',
             style: TextStyle(
               fontSize: 14,
               color: Colors.grey[500],
