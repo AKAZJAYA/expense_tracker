@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'package:expense_tracker/services/tutorial_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:printing/printing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -206,11 +208,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _exportData() async {
+    // Show format selection dialog
+    final format = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Export Format'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.picture_as_pdf, color: Colors.red),
+              title: const Text('PDF Report'),
+              subtitle: const Text('Formatted document'),
+              onTap: () => Navigator.pop(context, 'pdf'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.table_chart, color: Colors.green),
+              title: const Text('CSV Spreadsheet'),
+              subtitle: const Text('Import to Excel'),
+              onTap: () => Navigator.pop(context, 'csv'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (format == null) return;
+
     setState(() => _isLoading = true);
 
     try {
       final transactions = await DatabaseService.instance.getAllTransactions();
-      final categories = await DatabaseService.instance.getCategories();
 
       if (transactions.isEmpty) {
         if (mounted) {
@@ -222,15 +256,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return;
       }
 
-      final path = await ExportService.exportToCSV(transactions);
+      String? path;
+      if (format == 'pdf') {
+        path = await ExportService.exportToPDF(transactions);
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Data exported successfully to: $path'),
-            duration: const Duration(seconds: 3),
-          ),
-        );
+        if (path != null && mounted) {
+          // Show share dialog for PDF
+          final file = File(path);
+          await Printing.sharePdf(
+            bytes: await file.readAsBytes(),
+            filename: path.split('/').last,
+          );
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('PDF exported successfully'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      } else {
+        path = await ExportService.exportToCSV(transactions);
+
+        if (mounted && path != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('CSV saved to: $path'),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -792,7 +847,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final settings = Provider.of<AppSettingsProvider>(context, listen: false);
     String? selectedSymbol = settings.currencySymbol;
 
-    final currencies = ['\$', '€', '£', '¥', '₹', '₽', 'R\$', 'C\$', 'A\$'];
+    final currencies = [
+      '\$',
+      '€',
+      '£',
+      '¥',
+      '₹',
+      '₽',
+      'R\$',
+      'C\$',
+      'A\$',
+      'Rs'
+    ];
 
     await showDialog(
       context: context,
@@ -838,7 +904,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       case 'A\$':
         return 'Australian Dollar';
       default:
-        return 'Unknown';
+        return 'Sri Lankan Rupee';
     }
   }
 

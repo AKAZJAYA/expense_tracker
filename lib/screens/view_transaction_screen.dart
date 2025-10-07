@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import 'dart:io';
 import '../models/transaction.dart';
 import '../models/category.dart';
 import '../services/database_service.dart';
 import 'edit_transaction_screen.dart';
+import '../providers/app_settings_provider.dart';
 
 class ViewTransactionScreen extends StatefulWidget {
   final Transaction transaction;
@@ -82,6 +84,8 @@ class _ViewTransactionScreenState extends State<ViewTransactionScreen>
 
   @override
   Widget build(BuildContext context) {
+    final settings = Provider.of<AppSettingsProvider>(context);
+
     if (_isLoading) {
       return Scaffold(
         backgroundColor: Colors.grey[50],
@@ -230,6 +234,7 @@ class _ViewTransactionScreenState extends State<ViewTransactionScreen>
   }
 
   Widget _buildAmountCard() {
+    final settings = Provider.of<AppSettingsProvider>(context);
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20),
       padding: const EdgeInsets.all(28),
@@ -275,8 +280,7 @@ class _ViewTransactionScreenState extends State<ViewTransactionScreen>
               ),
               const SizedBox(width: 4),
               Text(
-                NumberFormat.currency(symbol: '\$')
-                    .format(widget.transaction.amount),
+                settings.formatCurrency(widget.transaction.amount),
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 48,

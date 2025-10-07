@@ -18,7 +18,7 @@ class OnboardingScreen extends StatefulWidget {
 class _OnboardingScreenState extends State<OnboardingScreen> {
   final PageController _pageController = PageController();
   int _currentPage = 0;
-  
+
   // User selections
   String _selectedCurrency = '\$';
   Set<String> _selectedExpenseCategories = {};
@@ -28,13 +28,25 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   // Default categories
   final List<Map<String, dynamic>> _defaultExpenseCategories = [
     {'name': 'Food & Dining', 'icon': Icons.restaurant, 'color': Colors.orange},
-    {'name': 'Transportation', 'icon': Icons.directions_car, 'color': Colors.blue},
+    {
+      'name': 'Transportation',
+      'icon': Icons.directions_car,
+      'color': Colors.blue
+    },
     {'name': 'Shopping', 'icon': Icons.shopping_bag, 'color': Colors.purple},
     {'name': 'Entertainment', 'icon': Icons.movie, 'color': Colors.pink},
     {'name': 'Bills & Utilities', 'icon': Icons.receipt, 'color': Colors.red},
     {'name': 'Healthcare', 'icon': Icons.local_hospital, 'color': Colors.green},
-    {'name': 'Groceries', 'icon': Icons.local_grocery_store, 'color': Colors.teal},
-    {'name': 'Gas & Fuel', 'icon': Icons.local_gas_station, 'color': Colors.amber},
+    {
+      'name': 'Groceries',
+      'icon': Icons.local_grocery_store,
+      'color': Colors.teal
+    },
+    {
+      'name': 'Gas & Fuel',
+      'icon': Icons.local_gas_station,
+      'color': Colors.amber
+    },
   ];
 
   final List<Map<String, dynamic>> _defaultIncomeCategories = [
@@ -54,25 +66,29 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     ),
     OnboardingData(
       title: 'Choose your currency',
-      description: 'Select the currency you\'ll be using for tracking your expenses.',
+      description:
+          'Select the currency you\'ll be using for tracking your expenses.',
       illustration: OnboardingIllustration.currency,
       buttonText: 'CONTINUE',
     ),
     OnboardingData(
       title: 'Select expense categories',
-      description: 'Choose the categories you want to track. You can add more later.',
+      description:
+          'Choose the categories you want to track. You can add more later.',
       illustration: OnboardingIllustration.categories,
       buttonText: 'CONTINUE',
     ),
     OnboardingData(
       title: 'Select income sources',
-      description: 'Choose your income categories. These help track where money comes from.',
+      description:
+          'Choose your income categories. These help track where money comes from.',
       illustration: OnboardingIllustration.income,
       buttonText: 'CONTINUE',
     ),
     OnboardingData(
       title: 'Import existing data?',
-      description: 'If you have transaction data from another app, you can import it now.',
+      description:
+          'If you have transaction data from another app, you can import it now.',
       illustration: OnboardingIllustration.import,
       buttonText: 'SKIP',
     ),
@@ -89,8 +105,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   void initState() {
     super.initState();
     // Select all categories by default
-    _selectedExpenseCategories = _defaultExpenseCategories.map((c) => c['name'] as String).toSet();
-    _selectedIncomeCategories = _defaultIncomeCategories.map((c) => c['name'] as String).toSet();
+    _selectedExpenseCategories =
+        _defaultExpenseCategories.map((c) => c['name'] as String).toSet();
+    _selectedIncomeCategories =
+        _defaultIncomeCategories.map((c) => c['name'] as String).toSet();
   }
 
   void _onPageChanged(int page) {
@@ -104,17 +122,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       // Validation for category pages
       if (_currentPage == 2 && _selectedExpenseCategories.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please select at least one expense category')),
+          const SnackBar(
+              content: Text('Please select at least one expense category')),
         );
         return;
       }
       if (_currentPage == 3 && _selectedIncomeCategories.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please select at least one income category')),
+          const SnackBar(
+              content: Text('Please select at least one income category')),
         );
         return;
       }
-      
+
       _pageController.nextPage(
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOut,
@@ -127,17 +147,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   Future<void> _completeOnboarding() async {
     final prefs = await SharedPreferences.getInstance();
     final settings = Provider.of<AppSettingsProvider>(context, listen: false);
-    
+
     // Save currency preference
     await settings.setCurrencySymbol(_selectedCurrency);
-    
+
     // Create selected categories
     await _createCategories();
-    
+
     // Mark onboarding as completed
     await prefs.setBool('isFirstLaunch', false);
-    await prefs.setBool('tutorial_shown', false); // Enable tutorial on first app use
-    
+    await prefs.setBool(
+        'tutorial_shown', false); // Enable tutorial on first app use
+
     // Navigate to home screen
     if (mounted) {
       Navigator.of(context).pushReplacement(
@@ -148,7 +169,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Future<void> _createCategories() async {
     final db = DatabaseService.instance;
-    
+
     // Create expense categories
     for (var categoryData in _defaultExpenseCategories) {
       if (_selectedExpenseCategories.contains(categoryData['name'])) {
@@ -161,7 +182,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         await db.createCategory(category);
       }
     }
-    
+
     // Create income categories
     for (var categoryData in _defaultIncomeCategories) {
       if (_selectedIncomeCategories.contains(categoryData['name'])) {
@@ -199,8 +220,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     if (confirmed == true) {
       // Use default settings and create all default categories
-      _selectedExpenseCategories = _defaultExpenseCategories.map((c) => c['name'] as String).toSet();
-      _selectedIncomeCategories = _defaultIncomeCategories.map((c) => c['name'] as String).toSet();
+      _selectedExpenseCategories =
+          _defaultExpenseCategories.map((c) => c['name'] as String).toSet();
+      _selectedIncomeCategories =
+          _defaultIncomeCategories.map((c) => c['name'] as String).toSet();
       await _completeOnboarding();
     }
   }
@@ -260,7 +283,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         await showDialog(
           context: context,
           builder: (context) => AlertDialog(
-            title: Text(importResult.success ? 'Import Complete' : 'Import Failed'),
+            title: Text(
+                importResult.success ? 'Import Complete' : 'Import Failed'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -485,6 +509,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       {'symbol': 'R\$', 'name': 'Brazilian Real', 'code': 'BRL'},
       {'symbol': 'C\$', 'name': 'Canadian Dollar', 'code': 'CAD'},
       {'symbol': 'A\$', 'name': 'Australian Dollar', 'code': 'AUD'},
+      {'symbol': 'Rs', 'name': 'Sri Lankan Rupee', 'code': 'LKR'},
     ];
 
     return Container(
@@ -501,7 +526,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         itemBuilder: (context, index) {
           final currency = currencies[index];
           final isSelected = _selectedCurrency == currency['symbol'];
-          
+
           return GestureDetector(
             onTap: () {
               setState(() {
@@ -510,7 +535,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             },
             child: Container(
               decoration: BoxDecoration(
-                color: isSelected ? Colors.white : Colors.white.withOpacity(0.2),
+                color:
+                    isSelected ? Colors.white : Colors.white.withOpacity(0.2),
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
                   color: isSelected ? Colors.white : Colors.transparent,
@@ -525,7 +551,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     style: TextStyle(
                       fontSize: 32,
                       fontWeight: FontWeight.bold,
-                      color: isSelected ? const Color(0xFF63B4A0) : Colors.white,
+                      color:
+                          isSelected ? const Color(0xFF63B4A0) : Colors.white,
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -533,7 +560,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     currency['code'] as String,
                     style: TextStyle(
                       fontSize: 12,
-                      color: isSelected ? const Color(0xFF63B4A0) : Colors.white.withOpacity(0.8),
+                      color: isSelected
+                          ? const Color(0xFF63B4A0)
+                          : Colors.white.withOpacity(0.8),
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -547,8 +576,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   Widget _buildCategorySelector(bool isExpense) {
-    final categories = isExpense ? _defaultExpenseCategories : _defaultIncomeCategories;
-    final selectedCategories = isExpense ? _selectedExpenseCategories : _selectedIncomeCategories;
+    final categories =
+        isExpense ? _defaultExpenseCategories : _defaultIncomeCategories;
+    final selectedCategories =
+        isExpense ? _selectedExpenseCategories : _selectedIncomeCategories;
 
     return Container(
       height: 320,
@@ -563,7 +594,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   if (selectedCategories.length == categories.length) {
                     selectedCategories.clear();
                   } else {
-                    selectedCategories.addAll(categories.map((c) => c['name'] as String));
+                    selectedCategories
+                        .addAll(categories.map((c) => c['name'] as String));
                   }
                 });
               },
@@ -574,7 +606,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 color: Colors.white,
               ),
               label: Text(
-                selectedCategories.length == categories.length ? 'Deselect All' : 'Select All',
+                selectedCategories.length == categories.length
+                    ? 'Deselect All'
+                    : 'Select All',
                 style: const TextStyle(color: Colors.white),
               ),
             ),
@@ -594,7 +628,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 final category = categories[index];
                 final categoryName = category['name'] as String;
                 final isSelected = selectedCategories.contains(categoryName);
-                
+
                 return GestureDetector(
                   onTap: () {
                     setState(() {
@@ -607,14 +641,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   },
                   child: Container(
                     decoration: BoxDecoration(
-                      color: isSelected ? Colors.white : Colors.white.withOpacity(0.2),
+                      color: isSelected
+                          ? Colors.white
+                          : Colors.white.withOpacity(0.2),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                         color: isSelected ? Colors.white : Colors.transparent,
                         width: 2,
                       ),
                     ),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     child: Row(
                       children: [
                         Icon(
@@ -850,7 +887,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                                 height: 6,
                                 decoration: const BoxDecoration(
                                   color: Color(0xFF2C5F6F),
-                                  borderRadius: BorderRadius.all(Radius.circular(3)),
+                                  borderRadius:
+                                      BorderRadius.all(Radius.circular(3)),
                                 ),
                               ),
                               const SizedBox(width: 12),
@@ -859,7 +897,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                                 height: 6,
                                 decoration: const BoxDecoration(
                                   color: Color(0xFF2C5F6F),
-                                  borderRadius: BorderRadius.all(Radius.circular(3)),
+                                  borderRadius:
+                                      BorderRadius.all(Radius.circular(3)),
                                 ),
                               ),
                             ],

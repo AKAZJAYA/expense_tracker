@@ -3,6 +3,8 @@ import 'package:flutter/cupertino.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import '../services/database_service.dart';
+import '../providers/app_settings_provider.dart';
+import 'package:provider/provider.dart';
 
 class StatisticsScreen extends StatefulWidget {
   const StatisticsScreen({super.key});
@@ -93,6 +95,8 @@ class _StatisticsScreenState extends State<StatisticsScreen> with SingleTickerPr
 
   @override
   Widget build(BuildContext context) {
+    final settings = Provider.of<AppSettingsProvider>(context);
+    
     return Scaffold(
       backgroundColor: Colors.grey[50],
       body: _isLoading && _spendingData.isEmpty
@@ -229,6 +233,8 @@ class _StatisticsScreenState extends State<StatisticsScreen> with SingleTickerPr
   }
 
   Widget _buildTotalCard() {
+    final settings = Provider.of<AppSettingsProvider>(context);
+    
     return Container(
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.all(24),
@@ -262,7 +268,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> with SingleTickerPr
           ),
           const SizedBox(height: 12),
           Text(
-            NumberFormat.currency(symbol: '\$').format(_totalSpending),
+            settings.formatCurrency(_totalSpending),
             style: const TextStyle(
               color: Colors.white,
               fontSize: 40,
@@ -355,6 +361,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> with SingleTickerPr
   Widget _buildCategoryList() {
     final sortedEntries = _spendingData.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
+    final settings = Provider.of<AppSettingsProvider>(context);
 
     final colors = [
       Colors.blue,
@@ -428,7 +435,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> with SingleTickerPr
                 ),
               ),
               Text(
-                NumberFormat.currency(symbol: '\$').format(entry.value),
+                settings.formatCurrency(entry.value),
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 16,

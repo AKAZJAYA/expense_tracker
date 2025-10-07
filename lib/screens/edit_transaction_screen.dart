@@ -6,6 +6,8 @@ import 'dart:io';
 import '../models/transaction.dart';
 import '../models/category.dart';
 import '../services/database_service.dart';
+import '../providers/app_settings_provider.dart';
+import 'package:provider/provider.dart';
 
 class EditTransactionScreen extends StatefulWidget {
   final Transaction transaction;
@@ -338,6 +340,8 @@ class _EditTransactionScreenState extends State<EditTransactionScreen>
   }
 
   Widget _buildAmountCard() {
+    final settings = Provider.of<AppSettingsProvider>(context, listen: false);
+    
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20),
       padding: const EdgeInsets.all(28),
@@ -380,7 +384,7 @@ class _EditTransactionScreenState extends State<EditTransactionScreen>
             textAlign: TextAlign.center,
             decoration: InputDecoration(
               hintText: '0.00',
-              prefixText: '\$ ',
+              prefixText: '${settings.currencySymbol} ',
               prefixStyle: const TextStyle(
                 fontSize: 48,
                 fontWeight: FontWeight.bold,

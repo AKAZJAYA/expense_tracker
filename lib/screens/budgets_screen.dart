@@ -1,11 +1,14 @@
+import 'package:expense_tracker/models/recurring_bill.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import 'dart:async';
 import '../models/budget.dart';
 import '../models/category.dart';
 import '../services/database_service.dart';
 import '../services/budget_monitor_service.dart';
+import '../providers/app_settings_provider.dart';
 
 class BudgetsScreen extends StatefulWidget {
   const BudgetsScreen({super.key});
@@ -119,6 +122,12 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final settings = Provider.of<AppSettingsProvider>(context);
+
+    if (_isLoading) {
+      return const Center(child: CupertinoActivityIndicator());
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: _isSearching
@@ -148,20 +157,18 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CupertinoActivityIndicator())
-          : _filteredBudgets.isEmpty
-              ? _buildEmptyState()
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _filteredBudgets.length,
-                  itemBuilder: (context, index) {
-                    final budget = _filteredBudgets[index];
-                    final category = _categories[budget.categoryId];
-                    final spent = _spending[budget.categoryId] ?? 0.0;
-                    return _buildBudgetCard(budget, category, spent);
-                  },
-                ),
+      body: _filteredBudgets.isEmpty
+          ? _buildEmptyState()
+          : ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _filteredBudgets.length,
+              itemBuilder: (context, index) {
+                final budget = _filteredBudgets[index];
+                final category = _categories[budget.categoryId];
+                final spent = _spending[budget.categoryId] ?? 0.0;
+                return _buildBudgetCard(budget, category, spent);
+              },
+            ),
       floatingActionButton: FloatingActionButton(
         onPressed: _showAddBudgetDialog,
         child: const Icon(Icons.add),
@@ -212,6 +219,7 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
   }
 
   Widget _buildBudgetCard(Budget budget, Category? category, double spent) {
+    final settings = Provider.of<AppSettingsProvider>(context);
     final percentage = (spent / budget.amount * 100).clamp(0, 100);
     final isOverBudget = spent > budget.amount;
     final alert = _alerts[budget.id];
@@ -339,13 +347,13 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  'Spent: ${NumberFormat.currency(symbol: '\$').format(spent)}',
+                  'Spent: ${settings.formatCurrency(spent)}',
                   style: TextStyle(
                     color: isOverBudget ? Colors.red : Colors.grey[700],
                   ),
                 ),
                 Text(
-                  'of ${NumberFormat.currency(symbol: '\$').format(budget.amount)}',
+                  'of ${settings.formatCurrency(budget.amount)}',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ],
@@ -375,8 +383,12 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                       ),
                 ),
                 Text(
-                  '${NumberFormat.currency(symbol: '\$').format(budget.amount - spent)} remaining',
-                  style: Theme.of(context).textTheme.bodySmall,
+                  'Remaining: ${settings.formatCurrency(budget.amount - spent)}',
+                  style: TextStyle(
+                    color:
+                        (budget.amount - spent) < 0 ? Colors.red : Colors.green,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ],
             ),
@@ -470,6 +482,7 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
       ),
     );
 
+    // Process result after dialog is completely closed
     if (result == true &&
         selectedCategoryId != null &&
         amountController.text.isNotEmpty) {
@@ -493,8 +506,138 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
         }
       }
     }
+  }
 
-    amountController.dispose();
+  Future<void> _showAddBillDialog() async {
+    final categories =
+        await DatabaseService.instance.getCategories(type: 'expense');
+    if (!mounted) return;
+
+    if (categories.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No expense categories available')),
+      );
+      return;
+    }
+
+    int? selectedCategoryId = categories.first.id;
+    final nameController = TextEditingController();
+    final amountController = TextEditingController();
+    String selectedFrequency = 'monthly';
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Add Recurring Bill'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(labelText: 'Bill Name'),
+                  textCapitalization: TextCapitalization.words,
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: amountController,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Amount',
+                    prefixText: '\$ ',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<int>(
+                  value: selectedCategoryId,
+                  decoration: const InputDecoration(labelText: 'Category'),
+                  items: categories.map((cat) {
+                    return DropdownMenuItem(
+                      value: cat.id,
+                      child: Row(
+                        children: [
+                          Icon(cat.icon, color: cat.color, size: 20),
+                          const SizedBox(width: 8),
+                          Text(cat.name),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: (value) {
+                    setDialogState(() => selectedCategoryId = value);
+                  },
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  value: selectedFrequency,
+                  decoration: const InputDecoration(labelText: 'Frequency'),
+                  items: const [
+                    DropdownMenuItem(value: 'weekly', child: Text('Weekly')),
+                    DropdownMenuItem(
+                        value: 'biweekly', child: Text('Bi-weekly')),
+                    DropdownMenuItem(value: 'monthly', child: Text('Monthly')),
+                    DropdownMenuItem(
+                        value: 'quarterly', child: Text('Quarterly')),
+                    DropdownMenuItem(value: 'yearly', child: Text('Yearly')),
+                  ],
+                  onChanged: (value) {
+                    setDialogState(() => selectedFrequency = value!);
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (nameController.text.isEmpty ||
+                    amountController.text.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please fill all fields')),
+                  );
+                  return;
+                }
+                Navigator.pop(context, true);
+              },
+              child: const Text('Add'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    // Process result after dialog is closed
+    if (result == true &&
+        selectedCategoryId != null &&
+        nameController.text.isNotEmpty &&
+        amountController.text.isNotEmpty) {
+      try {
+        final amount = double.parse(amountController.text);
+        final bill = RecurringBill(
+          name: nameController.text,
+          amount: amount,
+          categoryId: selectedCategoryId!,
+          frequency: selectedFrequency,
+          startDate: DateTime.now(),
+        );
+        await DatabaseService.instance.createRecurringBill(bill);
+        if (mounted) {
+          _loadData();
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error adding bill: $e')),
+          );
+        }
+      }
+    }
   }
 
   Future<void> _deleteBudget(Budget budget) async {

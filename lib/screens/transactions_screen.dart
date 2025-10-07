@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:intl/intl.dart';
+import 'package:printing/printing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
 import '../models/transaction.dart';
@@ -11,6 +14,8 @@ import '../services/tutorial_service.dart';
 import 'add_transaction_screen.dart';
 import 'edit_transaction_screen.dart';
 import 'view_transaction_screen.dart';
+import '../providers/app_settings_provider.dart';
+import 'package:provider/provider.dart';
 
 class TransactionsScreen extends StatefulWidget {
   const TransactionsScreen({super.key});
@@ -293,11 +298,34 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   Future<void> _exportTransactions() async {
     // Show date range selection dialog
     final dateRange = await _showExportRangeDialog();
+    if (dateRange == null) return;
 
-    if (dateRange == null) return; // User cancelled
+    // Show format selection
+    final format = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Export Format'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.picture_as_pdf, color: Colors.red),
+              title: const Text('PDF Report'),
+              onTap: () => Navigator.pop(context, 'pdf'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.table_chart, color: Colors.green),
+              title: const Text('CSV Spreadsheet'),
+              onTap: () => Navigator.pop(context, 'csv'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (format == null) return;
 
     try {
-      // Filter transactions by selected date range
       final transactionsToExport = _allTransactions.where((transaction) {
         return transaction.date.isAfter(dateRange['start']!) &&
             transaction.date
@@ -314,15 +342,38 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
         return;
       }
 
-      final path = await ExportService.exportToCSV(transactionsToExport);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                'Exported ${transactionsToExport.length} transactions to: $path'),
-            duration: const Duration(seconds: 3),
-          ),
-        );
+      String? path;
+      if (format == 'pdf') {
+        path = await ExportService.exportToPDF(transactionsToExport);
+
+        if (path != null && mounted) {
+          // Share the PDF
+          final file = File(path);
+          await Printing.sharePdf(
+            bytes: await file.readAsBytes(),
+            filename: path.split('/').last,
+          );
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content:
+                  Text('Exported ${transactionsToExport.length} transactions'),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      } else {
+        path = await ExportService.exportToCSV(transactionsToExport);
+
+        if (mounted && path != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                  'CSV saved: ${transactionsToExport.length} transactions'),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -1092,6 +1143,8 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final settings = Provider.of<AppSettingsProvider>(context);
+
     return Scaffold(
       backgroundColor: Colors.grey[50],
       body: _isLoading
@@ -1305,6 +1358,8 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   }
 
   Widget _buildSummaryCard() {
+    final settings = Provider.of<AppSettingsProvider>(context);
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(20),
@@ -1331,7 +1386,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
           ),
           const SizedBox(height: 6),
           Text(
-            NumberFormat.currency(symbol: '\$').format(_balance),
+            settings.formatCurrency(_balance),
             style: TextStyle(
               fontSize: 32,
               fontWeight: FontWeight.bold,
@@ -1368,6 +1423,8 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     Color color,
     IconData icon,
   ) {
+    final settings = Provider.of<AppSettingsProvider>(context);
+
     return Expanded(
       child: Column(
         children: [
@@ -1388,11 +1445,11 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            NumberFormat.currency(symbol: '\$').format(amount),
-            style: TextStyle(
+            settings.formatCurrency(amount),
+            style: const TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: color,
+              color: Colors.black87,
             ),
           ),
         ],

@@ -414,6 +414,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen>
   }
 
   Widget _buildAmountCard() {
+    final settings = Provider.of<AppSettingsProvider>(context, listen: false);
+    
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20),
       padding: const EdgeInsets.all(28),
@@ -452,7 +454,6 @@ class _AddTransactionScreenState extends State<AddTransactionScreen>
             inputFormatters: [
               FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
               TextInputFormatter.withFunction((oldValue, newValue) {
-                // Prevent entering more than max amount
                 final value = ValidationUtils.parseAmount(newValue.text);
                 if (value != null && value > ValidationUtils.maxAmount) {
                   return oldValue;
@@ -469,7 +470,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen>
             textAlign: TextAlign.center,
             decoration: InputDecoration(
               hintText: '0.00',
-              prefixText: '\$ ',
+              prefixText: '${settings.currencySymbol} ',
               prefixStyle: const TextStyle(
                 fontSize: 48,
                 fontWeight: FontWeight.bold,
@@ -477,7 +478,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen>
               ),
               border: InputBorder.none,
               hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
-              errorText: null, // Hide default error
+              errorText: null,
             ),
           ),
           if (_amountError != null)

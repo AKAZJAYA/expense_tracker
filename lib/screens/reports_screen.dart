@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import '../services/database_service.dart';
 import '../models/transaction.dart';
 import '../models/category.dart';
+import '../providers/app_settings_provider.dart';
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
@@ -253,6 +255,7 @@ class _ReportsScreenState extends State<ReportsScreen>
   }
 
   Widget _buildOverviewTab() {
+    final settings = Provider.of<AppSettingsProvider>(context);
     final netSavings = _totalIncome - _totalExpense;
     final avgDailySpending = _dailySpending.isEmpty
         ? 0.0
@@ -271,6 +274,7 @@ class _ReportsScreenState extends State<ReportsScreen>
                 _totalIncome,
                 Colors.green,
                 Icons.arrow_downward,
+                settings,
               ),
             ),
             const SizedBox(width: 12),
@@ -280,18 +284,19 @@ class _ReportsScreenState extends State<ReportsScreen>
                 _totalExpense,
                 Colors.red,
                 Icons.arrow_upward,
+                settings,
               ),
             ),
           ],
         ),
         const SizedBox(height: 12),
-        _buildNetSavingsCard(netSavings),
+        _buildNetSavingsCard(netSavings, settings),
         const SizedBox(height: 24),
 
         // Average Daily Spending
         _buildInfoCard(
           'Average Daily Spending',
-          NumberFormat.currency(symbol: '\$').format(avgDailySpending),
+          settings.formatCurrency(avgDailySpending),
           Icons.trending_up,
           Colors.blue,
         ),
@@ -322,7 +327,12 @@ class _ReportsScreenState extends State<ReportsScreen>
   }
 
   Widget _buildSummaryCard(
-      String title, double amount, Color color, IconData icon) {
+    String title,
+    double amount,
+    Color color,
+    IconData icon,
+    AppSettingsProvider settings,
+  ) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -355,7 +365,7 @@ class _ReportsScreenState extends State<ReportsScreen>
           ),
           const SizedBox(height: 12),
           Text(
-            NumberFormat.currency(symbol: '\$').format(amount),
+            settings.formatCurrency(amount),
             style: TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.bold,
@@ -367,7 +377,7 @@ class _ReportsScreenState extends State<ReportsScreen>
     );
   }
 
-  Widget _buildNetSavingsCard(double netSavings) {
+  Widget _buildNetSavingsCard(double netSavings, AppSettingsProvider settings) {
     final isPositive = netSavings >= 0;
     return Container(
       padding: const EdgeInsets.all(24),
@@ -400,7 +410,7 @@ class _ReportsScreenState extends State<ReportsScreen>
           ),
           const SizedBox(height: 8),
           Text(
-            NumberFormat.currency(symbol: '\$').format(netSavings.abs()),
+            settings.formatCurrency(netSavings.abs()),
             style: const TextStyle(
               color: Colors.white,
               fontSize: 36,
