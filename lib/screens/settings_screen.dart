@@ -1,3 +1,4 @@
+import 'package:expense_tracker/services/tutorial_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -580,7 +581,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _showBudgetAlertsDialog() async {
     final prefs = await SharedPreferences.getInstance();
-    
+
     await showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -705,7 +706,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(label),
-            Text('$value%', style: TextStyle(fontWeight: FontWeight.bold, color: color)),
+            Text('$value%',
+                style: TextStyle(fontWeight: FontWeight.bold, color: color)),
           ],
         ),
         Slider(
@@ -722,7 +724,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _showDefaultCategoryDialog(String type) async {
     final settings = Provider.of<AppSettingsProvider>(context, listen: false);
-    final filteredCategories = _categories.where((c) => c.type == type).toList();
+    final filteredCategories =
+        _categories.where((c) => c.type == type).toList();
 
     if (filteredCategories.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -738,7 +741,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Default ${type == 'expense' ? 'Expense' : 'Income'} Category'),
+        title: Text(
+            'Default ${type == 'expense' ? 'Expense' : 'Income'} Category'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -796,16 +800,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: const Text('Select Currency'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
-          children: currencies.map((symbol) => RadioListTile<String>(
-                contentPadding: EdgeInsets.zero,
-                title: Text('$symbol - ${_getCurrencyName(symbol)}'),
-                value: symbol,
-                groupValue: selectedSymbol,
-                onChanged: (value) async {
-                  await settings.setCurrencySymbol(value!);
-                  if (mounted) Navigator.pop(context);
-                },
-              )).toList(),
+          children: currencies
+              .map((symbol) => RadioListTile<String>(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text('$symbol - ${_getCurrencyName(symbol)}'),
+                    value: symbol,
+                    groupValue: selectedSymbol,
+                    onChanged: (value) async {
+                      await settings.setCurrencySymbol(value!);
+                      if (mounted) Navigator.pop(context);
+                    },
+                  ))
+              .toList(),
         ),
       ),
     );
@@ -813,22 +819,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   String _getCurrencyName(String symbol) {
     switch (symbol) {
-      case '\$': return 'US Dollar';
-      case '€': return 'Euro';
-      case '£': return 'British Pound';
-      case '¥': return 'Japanese Yen / Chinese Yuan';
-      case '₹': return 'Indian Rupee';
-      case '₽': return 'Russian Ruble';
-      case 'R\$': return 'Brazilian Real';
-      case 'C\$': return 'Canadian Dollar';
-      case 'A\$': return 'Australian Dollar';
-      default: return 'Unknown';
+      case '\$':
+        return 'US Dollar';
+      case '€':
+        return 'Euro';
+      case '£':
+        return 'British Pound';
+      case '¥':
+        return 'Japanese Yen / Chinese Yuan';
+      case '₹':
+        return 'Indian Rupee';
+      case '₽':
+        return 'Russian Ruble';
+      case 'R\$':
+        return 'Brazilian Real';
+      case 'C\$':
+        return 'Canadian Dollar';
+      case 'A\$':
+        return 'Australian Dollar';
+      default:
+        return 'Unknown';
     }
   }
 
   Future<void> _showNumberFormatDialog() async {
     final settings = Provider.of<AppSettingsProvider>(context, listen: false);
-    
+
     await showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -838,7 +854,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Decimal Separator:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text('Decimal Separator:',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
               Row(
                 children: [
                   Radio<String>(
@@ -866,7 +883,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
               ),
               const SizedBox(height: 16),
-              const Text('Thousands Separator:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text('Thousands Separator:',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
               Row(
                 children: [
                   Radio<String>(
@@ -929,7 +947,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _showDateFormatDialog() async {
     final settings = Provider.of<AppSettingsProvider>(context, listen: false);
-    
+
     final formats = [
       'MM/dd/yyyy',
       'dd/MM/yyyy',
@@ -1032,6 +1050,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _showTutorialAgain() async {
+    await TutorialService.instance.resetTutorials();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Tutorial will show again on next app launch'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -1079,13 +1110,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _buildSettingsTile(
                 icon: Icons.category_outlined,
                 title: 'Default Expense Category',
-                subtitle: _getDefaultCategoryName(settings.defaultExpenseCategoryId),
+                subtitle:
+                    _getDefaultCategoryName(settings.defaultExpenseCategoryId),
                 onTap: () => _showDefaultCategoryDialog('expense'),
               ),
               _buildSettingsTile(
                 icon: Icons.category_outlined,
                 title: 'Default Income Category',
-                subtitle: _getDefaultCategoryName(settings.defaultIncomeCategoryId),
+                subtitle:
+                    _getDefaultCategoryName(settings.defaultIncomeCategoryId),
                 onTap: () => _showDefaultCategoryDialog('income'),
               ),
             ],
@@ -1097,7 +1130,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _buildSettingsTile(
                 icon: Icons.attach_money,
                 title: 'Currency',
-                subtitle: '${settings.currencySymbol} - ${_getCurrencyName(settings.currencySymbol)}',
+                subtitle:
+                    '${settings.currencySymbol} - ${_getCurrencyName(settings.currencySymbol)}',
                 onTap: _showCurrencyDialog,
               ),
               _buildSettingsTile(
@@ -1109,7 +1143,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _buildSettingsTile(
                 icon: Icons.calendar_today,
                 title: 'Date & Time Format',
-                subtitle: '${settings.formatDate(DateTime.now())} ${settings.formatTime(DateTime.now())}',
+                subtitle:
+                    '${settings.formatDate(DateTime.now())} ${settings.formatTime(DateTime.now())}',
                 onTap: _showDateFormatDialog,
               ),
             ],
@@ -1168,6 +1203,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 title: 'Budget Alerts',
                 subtitle: _budgetAlertsEnabled ? 'Enabled' : 'Disabled',
                 onTap: _showBudgetAlertsDialog,
+              ),
+              _buildSettingsTile(
+                icon: Icons.help_outline,
+                title: 'Show Tutorial',
+                subtitle: 'View app tutorial again',
+                onTap: _showTutorialAgain,
               ),
             ],
           ),
@@ -1242,7 +1283,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (categoryId == null) return 'None';
     final category = _categories.firstWhere(
       (c) => c.id == categoryId,
-      orElse: () => Category(name: 'Unknown', type: 'expense', colorValue: 0xFF757575, iconCodePoint: Icons.help_outline.codePoint),
+      orElse: () => Category(
+          name: 'Unknown',
+          type: 'expense',
+          colorValue: 0xFF757575,
+          iconCodePoint: Icons.help_outline.codePoint),
     );
     return category.name;
   }

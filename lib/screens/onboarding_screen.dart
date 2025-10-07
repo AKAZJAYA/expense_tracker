@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:file_picker/file_picker.dart';
 import 'home_screen.dart';
+import '../services/database_service.dart';
+import '../services/export_service.dart';
+import '../models/category.dart';
+import '../providers/app_settings_provider.dart';
+import 'package:provider/provider.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -12,6 +18,31 @@ class OnboardingScreen extends StatefulWidget {
 class _OnboardingScreenState extends State<OnboardingScreen> {
   final PageController _pageController = PageController();
   int _currentPage = 0;
+  
+  // User selections
+  String _selectedCurrency = '\$';
+  Set<String> _selectedExpenseCategories = {};
+  Set<String> _selectedIncomeCategories = {};
+  bool _importingData = false;
+
+  // Default categories
+  final List<Map<String, dynamic>> _defaultExpenseCategories = [
+    {'name': 'Food & Dining', 'icon': Icons.restaurant, 'color': Colors.orange},
+    {'name': 'Transportation', 'icon': Icons.directions_car, 'color': Colors.blue},
+    {'name': 'Shopping', 'icon': Icons.shopping_bag, 'color': Colors.purple},
+    {'name': 'Entertainment', 'icon': Icons.movie, 'color': Colors.pink},
+    {'name': 'Bills & Utilities', 'icon': Icons.receipt, 'color': Colors.red},
+    {'name': 'Healthcare', 'icon': Icons.local_hospital, 'color': Colors.green},
+    {'name': 'Groceries', 'icon': Icons.local_grocery_store, 'color': Colors.teal},
+    {'name': 'Gas & Fuel', 'icon': Icons.local_gas_station, 'color': Colors.amber},
+  ];
+
+  final List<Map<String, dynamic>> _defaultIncomeCategories = [
+    {'name': 'Salary', 'icon': Icons.work, 'color': Colors.green},
+    {'name': 'Business', 'icon': Icons.business, 'color': Colors.blue},
+    {'name': 'Investments', 'icon': Icons.trending_up, 'color': Colors.purple},
+    {'name': 'Freelance', 'icon': Icons.laptop, 'color': Colors.orange},
+  ];
 
   final List<OnboardingData> _pages = [
     OnboardingData(
@@ -22,20 +53,45 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       buttonText: 'GET STARTED',
     ),
     OnboardingData(
-      title: 'Control your spend and\nstart saving',
-      description:
-          'Monefy helps you control your spending, track your expenses, and ultimately save more money.',
-      illustration: OnboardingIllustration.saving,
-      buttonText: 'AMAZING',
+      title: 'Choose your currency',
+      description: 'Select the currency you\'ll be using for tracking your expenses.',
+      illustration: OnboardingIllustration.currency,
+      buttonText: 'CONTINUE',
+    ),
+    OnboardingData(
+      title: 'Select expense categories',
+      description: 'Choose the categories you want to track. You can add more later.',
+      illustration: OnboardingIllustration.categories,
+      buttonText: 'CONTINUE',
+    ),
+    OnboardingData(
+      title: 'Select income sources',
+      description: 'Choose your income categories. These help track where money comes from.',
+      illustration: OnboardingIllustration.income,
+      buttonText: 'CONTINUE',
+    ),
+    OnboardingData(
+      title: 'Import existing data?',
+      description: 'If you have transaction data from another app, you can import it now.',
+      illustration: OnboardingIllustration.import,
+      buttonText: 'SKIP',
     ),
     OnboardingData(
       title: 'Together we\'ll reach your\nfinancial goals',
       description:
-          'If you fail to plan, you plan to fail. Monefy will help you stay focused on tracking your spend and reach your financial goals.',
+          'If you fail to plan, you plan to fail. WalletFlow will help you stay focused on tracking your spend and reach your financial goals.',
       illustration: OnboardingIllustration.goals,
-      buttonText: 'I\'M READY',
+      buttonText: 'LET\'S START',
     ),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    // Select all categories by default
+    _selectedExpenseCategories = _defaultExpenseCategories.map((c) => c['name'] as String).toSet();
+    _selectedIncomeCategories = _defaultIncomeCategories.map((c) => c['name'] as String).toSet();
+  }
 
   void _onPageChanged(int page) {
     setState(() {
@@ -45,21 +101,198 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Future<void> _onButtonPressed() async {
     if (_currentPage < _pages.length - 1) {
+      // Validation for category pages
+      if (_currentPage == 2 && _selectedExpenseCategories.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please select at least one expense category')),
+        );
+        return;
+      }
+      if (_currentPage == 3 && _selectedIncomeCategories.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please select at least one income category')),
+        );
+        return;
+      }
+      
       _pageController.nextPage(
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOut,
       );
     } else {
-      // Mark onboarding as completed
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('isFirstLaunch', false);
+      await _completeOnboarding();
+    }
+  }
 
-      // Navigate to home screen
+  Future<void> _completeOnboarding() async {
+    final prefs = await SharedPreferences.getInstance();
+    final settings = Provider.of<AppSettingsProvider>(context, listen: false);
+    
+    // Save currency preference
+    await settings.setCurrencySymbol(_selectedCurrency);
+    
+    // Create selected categories
+    await _createCategories();
+    
+    // Mark onboarding as completed
+    await prefs.setBool('isFirstLaunch', false);
+    await prefs.setBool('tutorial_shown', false); // Enable tutorial on first app use
+    
+    // Navigate to home screen
+    if (mounted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const HomeScreen()),
+      );
+    }
+  }
+
+  Future<void> _createCategories() async {
+    final db = DatabaseService.instance;
+    
+    // Create expense categories
+    for (var categoryData in _defaultExpenseCategories) {
+      if (_selectedExpenseCategories.contains(categoryData['name'])) {
+        final category = Category(
+          name: categoryData['name'] as String,
+          type: 'expense',
+          colorValue: (categoryData['color'] as Color).value,
+          iconCodePoint: (categoryData['icon'] as IconData).codePoint,
+        );
+        await db.createCategory(category);
+      }
+    }
+    
+    // Create income categories
+    for (var categoryData in _defaultIncomeCategories) {
+      if (_selectedIncomeCategories.contains(categoryData['name'])) {
+        final category = Category(
+          name: categoryData['name'] as String,
+          type: 'income',
+          colorValue: (categoryData['color'] as Color).value,
+          iconCodePoint: (categoryData['icon'] as IconData).codePoint,
+        );
+        await db.createCategory(category);
+      }
+    }
+  }
+
+  Future<void> _skipOnboarding() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Skip Setup?'),
+        content: const Text(
+          'You can always customize categories and settings later from the Settings screen.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('CANCEL'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('SKIP'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      // Use default settings and create all default categories
+      _selectedExpenseCategories = _defaultExpenseCategories.map((c) => c['name'] as String).toSet();
+      _selectedIncomeCategories = _defaultIncomeCategories.map((c) => c['name'] as String).toSet();
+      await _completeOnboarding();
+    }
+  }
+
+  Future<void> _importData() async {
+    setState(() => _importingData = true);
+
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['csv'],
+        allowMultiple: false,
+      );
+
+      if (result == null || result.files.isEmpty) {
+        setState(() => _importingData = false);
+        return;
+      }
+
+      final filePath = result.files.single.path;
+      if (filePath == null) {
+        throw Exception('Invalid file path');
+      }
+
+      // Show progress dialog
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              Text(
+                'Importing data...',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.grey[700],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      final importResult = await ExportService.restoreFromBackup(
+        filePath: filePath,
+        clearExisting: false,
+        onProgress: (current, total) {},
+      );
+
       if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const HomeScreen()),
+        Navigator.pop(context); // Close progress dialog
+
+        await showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(importResult.success ? 'Import Complete' : 'Import Failed'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (importResult.success) ...[
+                  Text('✅ Imported: ${importResult.imported} transactions'),
+                  if (importResult.skipped > 0)
+                    Text('⏭️ Skipped: ${importResult.skipped} (duplicates)'),
+                  if (importResult.errors > 0)
+                    Text('❌ Errors: ${importResult.errors}'),
+                ] else
+                  Text(importResult.message),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
         );
       }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // Close progress dialog if open
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Import error: $e')),
+        );
+      }
+    } finally {
+      setState(() => _importingData = false);
     }
   }
 
@@ -76,27 +309,41 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // App Store back button
-            Align(
-              alignment: Alignment.topLeft,
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.arrow_back_ios,
-                      color: Colors.white.withOpacity(0.8),
-                      size: 16,
-                    ),
-                    Text(
-                      'App Store',
-                      style: TextStyle(
+            // Top bar with skip button
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.arrow_back_ios,
                         color: Colors.white.withOpacity(0.8),
-                        fontSize: 16,
+                        size: 16,
+                      ),
+                      Text(
+                        'App Store',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.8),
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_currentPage > 0 && _currentPage < _pages.length - 1)
+                    TextButton(
+                      onPressed: _skipOnboarding,
+                      child: Text(
+                        'SKIP',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.9),
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
-                  ],
-                ),
+                ],
               ),
             ),
 
@@ -106,8 +353,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 controller: _pageController,
                 onPageChanged: _onPageChanged,
                 itemCount: _pages.length,
+                physics: const NeverScrollableScrollPhysics(), // Disable swipe
                 itemBuilder: (context, index) {
-                  return _buildPage(_pages[index]);
+                  return _buildPage(_pages[index], index);
                 },
               ),
             ),
@@ -130,7 +378,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               child: SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: _onButtonPressed,
+                  onPressed: _importingData ? null : _onButtonPressed,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.white,
                     foregroundColor: const Color(0xFF63B4A0),
@@ -140,14 +388,20 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     ),
                     elevation: 0,
                   ),
-                  child: Text(
-                    _pages[_currentPage].buttonText,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
-                    ),
-                  ),
+                  child: _importingData
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text(
+                          _pages[_currentPage].buttonText,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
                 ),
               ),
             ),
@@ -157,7 +411,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 
-  Widget _buildPage(OnboardingData data) {
+  Widget _buildPage(OnboardingData data, int pageIndex) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 32.0),
       child: Column(
@@ -165,8 +419,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         children: [
           const SizedBox(height: 40),
 
-          // Illustration
-          _buildIllustration(data.illustration),
+          // Illustration or interactive content
+          _buildPageContent(data.illustration, pageIndex),
 
           const SizedBox(height: 60),
 
@@ -201,24 +455,253 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 
-  Widget _buildIllustration(OnboardingIllustration type) {
+  Widget _buildPageContent(OnboardingIllustration type, int pageIndex) {
     switch (type) {
       case OnboardingIllustration.welcome:
         return _buildWelcomeIllustration();
-      case OnboardingIllustration.saving:
-        return _buildSavingIllustration();
+      case OnboardingIllustration.currency:
+        return _buildCurrencySelector();
+      case OnboardingIllustration.categories:
+        return _buildCategorySelector(true);
+      case OnboardingIllustration.income:
+        return _buildCategorySelector(false);
+      case OnboardingIllustration.import:
+        return _buildImportOptions();
       case OnboardingIllustration.goals:
         return _buildGoalsIllustration();
+      default:
+        return const SizedBox();
     }
   }
 
+  Widget _buildCurrencySelector() {
+    final currencies = [
+      {'symbol': '\$', 'name': 'US Dollar', 'code': 'USD'},
+      {'symbol': '€', 'name': 'Euro', 'code': 'EUR'},
+      {'symbol': '£', 'name': 'British Pound', 'code': 'GBP'},
+      {'symbol': '¥', 'name': 'Japanese Yen', 'code': 'JPY'},
+      {'symbol': '₹', 'name': 'Indian Rupee', 'code': 'INR'},
+      {'symbol': '₽', 'name': 'Russian Ruble', 'code': 'RUB'},
+      {'symbol': 'R\$', 'name': 'Brazilian Real', 'code': 'BRL'},
+      {'symbol': 'C\$', 'name': 'Canadian Dollar', 'code': 'CAD'},
+      {'symbol': 'A\$', 'name': 'Australian Dollar', 'code': 'AUD'},
+    ];
+
+    return Container(
+      height: 300,
+      child: GridView.builder(
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 3,
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          childAspectRatio: 1,
+        ),
+        itemCount: currencies.length,
+        shrinkWrap: true,
+        itemBuilder: (context, index) {
+          final currency = currencies[index];
+          final isSelected = _selectedCurrency == currency['symbol'];
+          
+          return GestureDetector(
+            onTap: () {
+              setState(() {
+                _selectedCurrency = currency['symbol'] as String;
+              });
+            },
+            child: Container(
+              decoration: BoxDecoration(
+                color: isSelected ? Colors.white : Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: isSelected ? Colors.white : Colors.transparent,
+                  width: 2,
+                ),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    currency['symbol'] as String,
+                    style: TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      color: isSelected ? const Color(0xFF63B4A0) : Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    currency['code'] as String,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isSelected ? const Color(0xFF63B4A0) : Colors.white.withOpacity(0.8),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildCategorySelector(bool isExpense) {
+    final categories = isExpense ? _defaultExpenseCategories : _defaultIncomeCategories;
+    final selectedCategories = isExpense ? _selectedExpenseCategories : _selectedIncomeCategories;
+
+    return Container(
+      height: 320,
+      child: Column(
+        children: [
+          // Select/Deselect all button
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: () {
+                setState(() {
+                  if (selectedCategories.length == categories.length) {
+                    selectedCategories.clear();
+                  } else {
+                    selectedCategories.addAll(categories.map((c) => c['name'] as String));
+                  }
+                });
+              },
+              icon: Icon(
+                selectedCategories.length == categories.length
+                    ? Icons.check_box
+                    : Icons.check_box_outline_blank,
+                color: Colors.white,
+              ),
+              label: Text(
+                selectedCategories.length == categories.length ? 'Deselect All' : 'Select All',
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: GridView.builder(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                childAspectRatio: 2.5,
+              ),
+              itemCount: categories.length,
+              shrinkWrap: true,
+              itemBuilder: (context, index) {
+                final category = categories[index];
+                final categoryName = category['name'] as String;
+                final isSelected = selectedCategories.contains(categoryName);
+                
+                return GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      if (isSelected) {
+                        selectedCategories.remove(categoryName);
+                      } else {
+                        selectedCategories.add(categoryName);
+                      }
+                    });
+                  },
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: isSelected ? Colors.white : Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isSelected ? Colors.white : Colors.transparent,
+                        width: 2,
+                      ),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Row(
+                      children: [
+                        Icon(
+                          category['icon'] as IconData,
+                          color: isSelected
+                              ? (category['color'] as Color)
+                              : Colors.white,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            categoryName,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: isSelected
+                                  ? const Color(0xFF63B4A0)
+                                  : Colors.white,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (isSelected)
+                          const Icon(
+                            Icons.check_circle,
+                            color: Color(0xFF63B4A0),
+                            size: 18,
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImportOptions() {
+    return Container(
+      height: 300,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.cloud_upload_outlined,
+            size: 80,
+            color: Colors.white.withOpacity(0.9),
+          ),
+          const SizedBox(height: 32),
+          ElevatedButton.icon(
+            onPressed: _importData,
+            icon: const Icon(Icons.file_upload),
+            label: const Text('IMPORT CSV FILE'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: const Color(0xFF63B4A0),
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(30),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'or skip to start fresh',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.7),
+              fontSize: 14,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Keep existing illustration methods
   Widget _buildWelcomeIllustration() {
     return Container(
       height: 300,
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // Background circle
           Container(
             width: 250,
             height: 250,
@@ -227,12 +710,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               shape: BoxShape.circle,
             ),
           ),
-
-          // Person meditating
           Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Head
               Container(
                 width: 60,
                 height: 60,
@@ -242,8 +722,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-
-              // Body
               Container(
                 width: 120,
                 height: 80,
@@ -252,8 +730,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   borderRadius: BorderRadius.circular(40),
                 ),
               ),
-
-              // Legs
               Container(
                 width: 140,
                 height: 60,
@@ -266,8 +742,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               ),
             ],
           ),
-
-          // Floating books - left
           Positioned(
             left: 20,
             top: 100,
@@ -283,8 +757,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               ),
             ),
           ),
-
-          // Floating books - right
           Positioned(
             right: 20,
             top: 100,
@@ -300,8 +772,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               ),
             ),
           ),
-
-          // Plant
           Positioned(
             left: 40,
             bottom: 40,
@@ -333,138 +803,21 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 
-  Widget _buildSavingIllustration() {
-    return Container(
-      height: 300,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          // Piggy bank
-          Container(
-            width: 200,
-            height: 160,
-            decoration: BoxDecoration(
-              color: Colors.pink.shade100,
-              borderRadius: BorderRadius.circular(100),
-            ),
-          ),
-
-          // Snout
-          Positioned(
-            right: 120,
-            child: Container(
-              width: 60,
-              height: 50,
-              decoration: BoxDecoration(
-                color: Colors.pink.shade50,
-                borderRadius: BorderRadius.circular(30),
-              ),
-            ),
-          ),
-
-          // Ears
-          Positioned(
-            top: 50,
-            left: 100,
-            child: Container(
-              width: 40,
-              height: 50,
-              decoration: BoxDecoration(
-                color: Colors.pink.shade50,
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(30),
-                  topRight: Radius.circular(30),
-                ),
-              ),
-            ),
-          ),
-
-          Positioned(
-            top: 50,
-            right: 100,
-            child: Container(
-              width: 40,
-              height: 50,
-              decoration: BoxDecoration(
-                color: Colors.pink.shade50,
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(30),
-                  topRight: Radius.circular(30),
-                ),
-              ),
-            ),
-          ),
-
-          // Tail
-          Positioned(
-            left: 110,
-            top: 120,
-            child: Transform.rotate(
-              angle: -0.5,
-              child: Container(
-                width: 12,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: Colors.pink.shade100,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-            ),
-          ),
-
-          // Coins
-          Positioned(
-            top: 20,
-            right: 130,
-            child: _buildCoin(30, Colors.amber.shade300),
-          ),
-          Positioned(
-            top: 10,
-            right: 100,
-            child: _buildCoin(25, Colors.amber.shade400),
-          ),
-          Positioned(
-            top: 0,
-            right: 115,
-            child: _buildCoin(28, Colors.amber.shade500),
-          ),
-
-          // Shadow
-          Positioned(
-            bottom: -20,
-            child: Container(
-              width: 220,
-              height: 40,
-              decoration: BoxDecoration(
-                color: const Color(0xFF4A9985).withOpacity(0.3),
-                borderRadius: BorderRadius.circular(100),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildGoalsIllustration() {
     return Container(
       height: 300,
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // Mountains
           Positioned(
             bottom: 60,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Back mountain
                 CustomPaint(
                   size: const Size(120, 100),
                   painter: MountainPainter(const Color(0xFF5A8B7C)),
                 ),
-
-                // Front mountain with flag
                 Stack(
                   alignment: Alignment.topCenter,
                   children: [
@@ -472,8 +825,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       size: const Size(150, 130),
                       painter: MountainPainter(const Color(0xFF4A7C6D)),
                     ),
-
-                    // Peak snow
                     Positioned(
                       top: 0,
                       child: Container(
@@ -488,13 +839,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         ),
                       ),
                     ),
-
-                    // Happy face on mountain
                     Positioned(
                       top: 35,
                       child: Column(
                         children: [
-                          // Eyes
                           Row(
                             children: [
                               Container(
@@ -502,8 +850,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                                 height: 6,
                                 decoration: const BoxDecoration(
                                   color: Color(0xFF2C5F6F),
-                                  borderRadius:
-                                      BorderRadius.all(Radius.circular(3)),
+                                  borderRadius: BorderRadius.all(Radius.circular(3)),
                                 ),
                               ),
                               const SizedBox(width: 12),
@@ -512,15 +859,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                                 height: 6,
                                 decoration: const BoxDecoration(
                                   color: Color(0xFF2C5F6F),
-                                  borderRadius:
-                                      BorderRadius.all(Radius.circular(3)),
+                                  borderRadius: BorderRadius.all(Radius.circular(3)),
                                 ),
                               ),
                             ],
                           ),
                           const SizedBox(height: 8),
-
-                          // Smile
                           Container(
                             width: 30,
                             height: 15,
@@ -539,8 +883,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         ],
                       ),
                     ),
-
-                    // Flag pole
                     Positioned(
                       top: -10,
                       child: Container(
@@ -549,8 +891,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         color: const Color(0xFF5A7C8F),
                       ),
                     ),
-
-                    // Flag
                     Positioned(
                       top: -8,
                       left: 78,
@@ -559,23 +899,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         child: Container(
                           width: 30,
                           height: 25,
-                          color: Colors.amber.shade400,
+                          color: Colors.red.shade400,
                         ),
                       ),
                     ),
                   ],
                 ),
-
-                // Back mountain
-                CustomPaint(
-                  size: const Size(100, 90),
-                  painter: MountainPainter(const Color(0xFF5A8B7C)),
-                ),
               ],
             ),
           ),
-
-          // Clouds
           Positioned(
             left: 30,
             top: 80,
@@ -586,8 +918,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             top: 100,
             child: _buildCloud(70, 40),
           ),
-
-          // Shadow
           Positioned(
             bottom: 40,
             child: Container(
@@ -598,24 +928,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 borderRadius: BorderRadius.circular(150),
               ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCoin(double size, Color color) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
           ),
         ],
       ),
@@ -648,7 +960,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 }
 
-// Custom painter for mountains
 class MountainPainter extends CustomPainter {
   final Color color;
 
@@ -673,7 +984,6 @@ class MountainPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-// Custom clipper for flag
 class FlagClipper extends CustomClipper<Path> {
   @override
   Path getClip(Size size) {
@@ -689,7 +999,6 @@ class FlagClipper extends CustomClipper<Path> {
   bool shouldReclip(covariant CustomClipper<Path> oldClipper) => false;
 }
 
-// Data class for onboarding pages
 class OnboardingData {
   final String title;
   final String description;
@@ -706,6 +1015,9 @@ class OnboardingData {
 
 enum OnboardingIllustration {
   welcome,
-  saving,
+  currency,
+  categories,
+  income,
+  import,
   goals,
 }

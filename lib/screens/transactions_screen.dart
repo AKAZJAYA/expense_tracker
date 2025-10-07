@@ -7,6 +7,7 @@ import '../models/transaction.dart';
 import '../models/category.dart';
 import '../services/database_service.dart';
 import '../services/export_service.dart';
+import '../services/tutorial_service.dart';
 import 'add_transaction_screen.dart';
 import 'edit_transaction_screen.dart';
 import 'view_transaction_screen.dart';
@@ -1018,6 +1019,74 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
       deleteIconColor: Theme.of(context).primaryColor,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
       visualDensity: VisualDensity.compact,
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _showTutorialIfNeeded();
+  }
+
+  Future<void> _showTutorialIfNeeded() async {
+    if (!mounted) return;
+
+    final shouldShow =
+        await TutorialService.instance.shouldShowTutorial('transactions');
+    if (!shouldShow || !mounted) return;
+
+    // Wait for the screen to fully render
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    if (!mounted) return;
+
+    TutorialService.showTutorialOverlay(
+      context,
+      steps: [
+        TutorialStep(
+          title: 'Welcome to Transactions!',
+          description:
+              'This is where you\'ll see all your income and expenses.',
+          icon: Icons.list_alt,
+          textAlignment: Alignment.center,
+        ),
+        TutorialStep(
+          title: 'Add Transaction',
+          description:
+              'Tap the + button to add a new transaction with photo receipts.',
+          icon: Icons.add_circle_outline,
+          textAlignment: Alignment.topCenter,
+        ),
+        TutorialStep(
+          title: 'Swipe to Edit',
+          description: 'Swipe left on any transaction to quickly edit it.',
+          icon: Icons.swipe,
+          textAlignment: Alignment.center,
+        ),
+        TutorialStep(
+          title: 'Swipe to Delete',
+          description: 'Swipe right on any transaction to delete it.',
+          icon: Icons.delete_sweep,
+          textAlignment: Alignment.center,
+        ),
+        TutorialStep(
+          title: 'Filter & Search',
+          description:
+              'Use the search bar and filters to find specific transactions.',
+          icon: Icons.filter_list,
+          textAlignment: Alignment.topCenter,
+        ),
+        TutorialStep(
+          title: 'You\'re All Set!',
+          description:
+              'Start tracking your expenses and reach your financial goals!',
+          icon: Icons.check_circle_outline,
+          textAlignment: Alignment.center,
+        ),
+      ],
+      onComplete: () async {
+        await TutorialService.instance.markTutorialShown('transactions');
+      },
     );
   }
 
