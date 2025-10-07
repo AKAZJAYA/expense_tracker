@@ -2,8 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import '../services/database_service.dart';
 import '../services/export_service.dart';
+import '../models/category.dart';
+import '../providers/theme_provider.dart';
+import '../providers/app_settings_provider.dart';
 import 'categories_screen.dart';
 import 'recurring_bills_screen.dart';
 
@@ -17,10 +21,10 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _carryOverEnabled = false;
   bool _notificationsEnabled = true;
-  String _selectedTheme = 'Light';
   bool _isLoading = false;
+  List<Category> _categories = [];
 
-  // Add these to the class variables
+  // Budget alert settings
   bool _budgetAlertsEnabled = true;
   String _alertFrequency = 'immediate';
   int _threshold80 = 80;
@@ -31,6 +35,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _loadSettings();
+    _loadCategories();
   }
 
   Future<void> _loadSettings() async {
@@ -38,12 +43,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _carryOverEnabled = prefs.getBool('carry_over_enabled') ?? false;
       _notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
-      _selectedTheme = prefs.getString('theme') ?? 'Light';
       _budgetAlertsEnabled = prefs.getBool('budget_alerts_enabled') ?? true;
       _alertFrequency = prefs.getString('alert_frequency') ?? 'immediate';
       _threshold80 = prefs.getInt('alert_threshold_80') ?? 80;
       _threshold100 = prefs.getInt('alert_threshold_100') ?? 100;
       _threshold120 = prefs.getInt('alert_threshold_120') ?? 120;
+    });
+  }
+
+  Future<void> _loadCategories() async {
+    final categories = await DatabaseService.instance.getCategories();
+    setState(() {
+      _categories = categories;
     });
   }
 
@@ -66,7 +77,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _showThemeDialog() async {
+  Future<void> _showThemeDialog(ThemeProvider themeProvider) async {
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -77,19 +88,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
             RadioListTile<String>(
               title: const Text('Light'),
               value: 'Light',
-              groupValue: _selectedTheme,
+              groupValue: themeProvider.themeModeName,
               onChanged: (value) => Navigator.pop(context, value),
             ),
             RadioListTile<String>(
               title: const Text('Dark'),
               value: 'Dark',
-              groupValue: _selectedTheme,
+              groupValue: themeProvider.themeModeName,
               onChanged: (value) => Navigator.pop(context, value),
             ),
             RadioListTile<String>(
               title: const Text('System'),
               value: 'System',
-              groupValue: _selectedTheme,
+              groupValue: themeProvider.themeModeName,
               onChanged: (value) => Navigator.pop(context, value),
             ),
           ],
@@ -98,11 +109,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
 
     if (result != null) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('theme', result);
-      setState(() {
-        _selectedTheme = result;
-      });
+      await themeProvider.setThemeMode(result);
     }
   }
 
@@ -713,6 +720,318 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Future<void> _showDefaultCategoryDialog(String type) async {
+    final settings = Provider.of<AppSettingsProvider>(context, listen: false);
+    final filteredCategories = _categories.where((c) => c.type == type).toList();
+
+    if (filteredCategories.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No $type categories available')),
+      );
+      return;
+    }
+
+    final currentDefault = type == 'expense'
+        ? settings.defaultExpenseCategoryId
+        : settings.defaultIncomeCategoryId;
+
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Default ${type == 'expense' ? 'Expense' : 'Income'} Category'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('None'),
+              leading: Radio<int?>(
+                value: null,
+                groupValue: currentDefault,
+                onChanged: (value) async {
+                  if (type == 'expense') {
+                    await settings.setDefaultExpenseCategory(null);
+                  } else {
+                    await settings.setDefaultIncomeCategory(null);
+                  }
+                  if (mounted) Navigator.pop(context);
+                },
+              ),
+            ),
+            ...filteredCategories.map((category) => ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(category.name),
+                  leading: Radio<int?>(
+                    value: category.id,
+                    groupValue: currentDefault,
+                    onChanged: (value) async {
+                      if (type == 'expense') {
+                        await settings.setDefaultExpenseCategory(value);
+                      } else {
+                        await settings.setDefaultIncomeCategory(value);
+                      }
+                      if (mounted) Navigator.pop(context);
+                    },
+                  ),
+                  trailing: Icon(
+                    category.icon,
+                    color: category.color,
+                  ),
+                )),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showCurrencyDialog() async {
+    final settings = Provider.of<AppSettingsProvider>(context, listen: false);
+    String? selectedSymbol = settings.currencySymbol;
+
+    final currencies = ['\$', '€', '£', '¥', '₹', '₽', 'R\$', 'C\$', 'A\$'];
+
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Select Currency'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: currencies.map((symbol) => RadioListTile<String>(
+                contentPadding: EdgeInsets.zero,
+                title: Text('$symbol - ${_getCurrencyName(symbol)}'),
+                value: symbol,
+                groupValue: selectedSymbol,
+                onChanged: (value) async {
+                  await settings.setCurrencySymbol(value!);
+                  if (mounted) Navigator.pop(context);
+                },
+              )).toList(),
+        ),
+      ),
+    );
+  }
+
+  String _getCurrencyName(String symbol) {
+    switch (symbol) {
+      case '\$': return 'US Dollar';
+      case '€': return 'Euro';
+      case '£': return 'British Pound';
+      case '¥': return 'Japanese Yen / Chinese Yuan';
+      case '₹': return 'Indian Rupee';
+      case '₽': return 'Russian Ruble';
+      case 'R\$': return 'Brazilian Real';
+      case 'C\$': return 'Canadian Dollar';
+      case 'A\$': return 'Australian Dollar';
+      default: return 'Unknown';
+    }
+  }
+
+  Future<void> _showNumberFormatDialog() async {
+    final settings = Provider.of<AppSettingsProvider>(context, listen: false);
+    
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Number Format'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Decimal Separator:', style: TextStyle(fontWeight: FontWeight.bold)),
+              Row(
+                children: [
+                  Radio<String>(
+                    value: '.',
+                    groupValue: settings.decimalSeparator,
+                    onChanged: (value) async {
+                      await settings.setDecimalSeparator(value!);
+                      setDialogState(() {});
+                    },
+                  ),
+                  const Text('Period (.)'),
+                ],
+              ),
+              Row(
+                children: [
+                  Radio<String>(
+                    value: ',',
+                    groupValue: settings.decimalSeparator,
+                    onChanged: (value) async {
+                      await settings.setDecimalSeparator(value!);
+                      setDialogState(() {});
+                    },
+                  ),
+                  const Text('Comma (,)'),
+                ],
+              ),
+              const SizedBox(height: 16),
+              const Text('Thousands Separator:', style: TextStyle(fontWeight: FontWeight.bold)),
+              Row(
+                children: [
+                  Radio<String>(
+                    value: ',',
+                    groupValue: settings.thousandsSeparator,
+                    onChanged: (value) async {
+                      await settings.setThousandsSeparator(value!);
+                      setDialogState(() {});
+                    },
+                  ),
+                  const Text('Comma (,)'),
+                ],
+              ),
+              Row(
+                children: [
+                  Radio<String>(
+                    value: '.',
+                    groupValue: settings.thousandsSeparator,
+                    onChanged: (value) async {
+                      await settings.setThousandsSeparator(value!);
+                      setDialogState(() {});
+                    },
+                  ),
+                  const Text('Period (.)'),
+                ],
+              ),
+              Row(
+                children: [
+                  Radio<String>(
+                    value: ' ',
+                    groupValue: settings.thousandsSeparator,
+                    onChanged: (value) async {
+                      await settings.setThousandsSeparator(value!);
+                      setDialogState(() {});
+                    },
+                  ),
+                  const Text('Space ( )'),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Example: ${settings.formatCurrency(1234567.89)}',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).primaryColor,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showDateFormatDialog() async {
+    final settings = Provider.of<AppSettingsProvider>(context, listen: false);
+    
+    final formats = [
+      'MM/dd/yyyy',
+      'dd/MM/yyyy',
+      'yyyy-MM-dd',
+    ];
+
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Date Format'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ...formats.map((format) => RadioListTile<String>(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('$format - ${_formatDateExample(format)}'),
+                  value: format,
+                  groupValue: settings.dateFormat,
+                  onChanged: (value) async {
+                    await settings.setDateFormat(value!);
+                    if (mounted) Navigator.pop(context);
+                  },
+                )),
+            const Divider(),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('24-Hour Time'),
+              subtitle: Text(settings.use24HourTime ? '14:30' : '2:30 PM'),
+              value: settings.use24HourTime,
+              onChanged: (value) async {
+                await settings.set24HourTime(value);
+                setState(() {});
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatDateExample(String format) {
+    final now = DateTime.now();
+    switch (format) {
+      case 'dd/MM/yyyy':
+        return DateFormat('dd/MM/yyyy').format(now);
+      case 'yyyy-MM-dd':
+        return DateFormat('yyyy-MM-dd').format(now);
+      default:
+        return DateFormat('MM/dd/yyyy').format(now);
+    }
+  }
+
+  Future<void> _showResetDialog() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reset to Defaults'),
+        content: const Text(
+          'This will reset all settings to their default values. Your transactions and categories will not be affected.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      final settings = Provider.of<AppSettingsProvider>(context, listen: false);
+      final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
+      final prefs = await SharedPreferences.getInstance();
+
+      await settings.resetToDefaults();
+      await themeProvider.setThemeMode('System');
+      await prefs.setBool('carry_over_enabled', false);
+      await prefs.setBool('notifications_enabled', true);
+      await prefs.setBool('budget_alerts_enabled', true);
+      await prefs.setString('alert_frequency', 'immediate');
+      await prefs.setInt('alert_threshold_80', 80);
+      await prefs.setInt('alert_threshold_100', 100);
+      await prefs.setInt('alert_threshold_120', 120);
+
+      await _loadSettings();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Settings reset to defaults'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -729,6 +1048,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
     }
 
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    final settings = Provider.of<AppSettingsProvider>(context);
+
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
@@ -739,6 +1061,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          _buildSettingsSection(
+            title: 'Appearance',
+            children: [
+              _buildSettingsTile(
+                icon: Icons.palette_outlined,
+                title: 'Theme',
+                subtitle: themeProvider.themeModeName,
+                onTap: () => _showThemeDialog(themeProvider),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          _buildSettingsSection(
+            title: 'Defaults',
+            children: [
+              _buildSettingsTile(
+                icon: Icons.category_outlined,
+                title: 'Default Expense Category',
+                subtitle: _getDefaultCategoryName(settings.defaultExpenseCategoryId),
+                onTap: () => _showDefaultCategoryDialog('expense'),
+              ),
+              _buildSettingsTile(
+                icon: Icons.category_outlined,
+                title: 'Default Income Category',
+                subtitle: _getDefaultCategoryName(settings.defaultIncomeCategoryId),
+                onTap: () => _showDefaultCategoryDialog('income'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          _buildSettingsSection(
+            title: 'Formats',
+            children: [
+              _buildSettingsTile(
+                icon: Icons.attach_money,
+                title: 'Currency',
+                subtitle: '${settings.currencySymbol} - ${_getCurrencyName(settings.currencySymbol)}',
+                onTap: _showCurrencyDialog,
+              ),
+              _buildSettingsTile(
+                icon: Icons.numbers,
+                title: 'Number Format',
+                subtitle: settings.formatCurrency(1234.56),
+                onTap: _showNumberFormatDialog,
+              ),
+              _buildSettingsTile(
+                icon: Icons.calendar_today,
+                title: 'Date & Time Format',
+                subtitle: '${settings.formatDate(DateTime.now())} ${settings.formatTime(DateTime.now())}',
+                onTap: _showDateFormatDialog,
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
           _buildSettingsSection(
             title: 'Transactions',
             children: [
@@ -756,12 +1132,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'General',
             children: [
               _buildSettingsTile(
-                icon: Icons.palette_outlined,
-                title: 'Theme',
-                subtitle: _selectedTheme,
-                onTap: _showThemeDialog,
-              ),
-              _buildSettingsTile(
                 icon: Icons.category_outlined,
                 title: 'Manage Categories',
                 subtitle: 'Add, edit, or delete categories',
@@ -771,7 +1141,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     MaterialPageRoute(
                       builder: (context) => const CategoriesScreen(),
                     ),
-                  );
+                  ).then((_) => _loadCategories());
                 },
               ),
               _buildSettingsTile(
@@ -840,6 +1210,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 24),
           _buildSettingsSection(
+            title: 'Advanced',
+            children: [
+              _buildSettingsTile(
+                icon: Icons.restore_outlined,
+                title: 'Reset to Defaults',
+                subtitle: 'Restore all settings to default values',
+                onTap: _showResetDialog,
+                isDestructive: true,
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          _buildSettingsSection(
             title: 'About',
             children: [
               _buildSettingsTile(
@@ -855,32 +1238,49 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  String _getDefaultCategoryName(int? categoryId) {
+    if (categoryId == null) return 'None';
+    final category = _categories.firstWhere(
+      (c) => c.id == categoryId,
+      orElse: () => Category(name: 'Unknown', type: 'expense', colorValue: 0xFF757575, iconCodePoint: Icons.help_outline.codePoint),
+    );
+    return category.name;
+  }
+
   Widget _buildSettingsSection({
     required String title,
     required List<Widget> children,
   }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 16, bottom: 8),
-          child: Text(
-            title,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey,
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.1),
+            spreadRadius: 1,
+            blurRadius: 3,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              title,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Theme.of(context).primaryColor,
+              ),
             ),
           ),
-        ),
-        Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Column(children: children),
-        ),
-      ],
+          ...children,
+        ],
+      ),
     );
   }
 
@@ -894,17 +1294,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return ListTile(
       leading: Icon(
         icon,
-        color: isDestructive ? Colors.red : Colors.grey[700],
+        color: isDestructive ? Colors.red : Theme.of(context).primaryColor,
       ),
       title: Text(
         title,
         style: TextStyle(
-          color: isDestructive ? Colors.red : Colors.black,
+          color: isDestructive ? Colors.red : null,
           fontWeight: FontWeight.w500,
         ),
       ),
       subtitle: Text(subtitle),
-      trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+      trailing: const Icon(Icons.chevron_right),
       onTap: onTap,
     );
   }
@@ -916,20 +1316,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required bool value,
     required Function(bool) onChanged,
   }) {
-    return SwitchListTile(
-      secondary: Icon(icon, color: Colors.grey[700]),
+    return ListTile(
+      leading: Icon(
+        icon,
+        color: Theme.of(context).primaryColor,
+      ),
       title: Text(
         title,
         style: const TextStyle(fontWeight: FontWeight.w500),
       ),
       subtitle: Text(subtitle),
-      value: value,
-      onChanged: onChanged,
+      trailing: Switch(
+        value: value,
+        onChanged: onChanged,
+      ),
     );
   }
 }
 
 class _ImportProgressDialog extends StatelessWidget {
+  const _ImportProgressDialog();
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
