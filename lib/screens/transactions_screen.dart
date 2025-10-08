@@ -182,11 +182,34 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   }
 
   Future<void> _exportTransactions() async {
+    // Show date range selection dialog
+    final dateRange = await _showExportRangeDialog();
+    
+    if (dateRange == null) return; // User cancelled
+    
     try {
-      final path = await ExportService.exportToCSV(_allTransactions);
+      // Filter transactions by selected date range
+      final transactionsToExport = _allTransactions.where((transaction) {
+        return transaction.date.isAfter(dateRange['start']!) &&
+               transaction.date.isBefore(dateRange['end']!.add(const Duration(days: 1)));
+      }).toList();
+      
+      if (transactionsToExport.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No transactions found in selected range')),
+          );
+        }
+        return;
+      }
+      
+      final path = await ExportService.exportToCSV(transactionsToExport);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Exported to: $path')),
+          SnackBar(
+            content: Text('Exported ${transactionsToExport.length} transactions to: $path'),
+            duration: const Duration(seconds: 3),
+          ),
         );
       }
     } catch (e) {
@@ -195,6 +218,219 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
           SnackBar(content: Text('Export failed: $e')),
         );
       }
+    }
+  }
+
+  Future<Map<String, DateTime>?> _showExportRangeDialog() async {
+    String selectedRange = 'day';
+    DateTime? customStartDate;
+    DateTime? customEndDate;
+    
+    return await showDialog<Map<String, DateTime>>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: const Text('Export Transactions'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Select time period:',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _buildRangeOption(
+                  'Today',
+                  'day',
+                  selectedRange,
+                  (value) => setState(() => selectedRange = value),
+                ),
+                _buildRangeOption(
+                  'This Week',
+                  'week',
+                  selectedRange,
+                  (value) => setState(() => selectedRange = value),
+                ),
+                _buildRangeOption(
+                  'This Month',
+                  'month',
+                  selectedRange,
+                  (value) => setState(() => selectedRange = value),
+                ),
+                _buildRangeOption(
+                  'This Year',
+                  'year',
+                  selectedRange,
+                  (value) => setState(() => selectedRange = value),
+                ),
+                _buildRangeOption(
+                  'All Time',
+                  'all',
+                  selectedRange,
+                  (value) => setState(() => selectedRange = value),
+                ),
+                _buildRangeOption(
+                  'Custom Range',
+                  'custom',
+                  selectedRange,
+                  (value) => setState(() => selectedRange = value),
+                ),
+                if (selectedRange == 'custom') ...[
+                  const SizedBox(height: 16),
+                  const Divider(),
+                  const SizedBox(height: 8),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: Text(
+                      customStartDate == null
+                          ? 'Select Start Date'
+                          : 'From: ${DateFormat('MMM d, yyyy').format(customStartDate!)}',
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                    trailing: const Icon(Icons.calendar_today, size: 20),
+                    onTap: () async {
+                      final date = await showDatePicker(
+                        context: context,
+                        initialDate: customStartDate ?? DateTime.now(),
+                        firstDate: DateTime(2000),
+                        lastDate: DateTime.now(),
+                      );
+                      if (date != null) {
+                        setState(() => customStartDate = date);
+                      }
+                    },
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: Text(
+                      customEndDate == null
+                          ? 'Select End Date'
+                          : 'To: ${DateFormat('MMM d, yyyy').format(customEndDate!)}',
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                    trailing: const Icon(Icons.calendar_today, size: 20),
+                    onTap: () async {
+                      final date = await showDatePicker(
+                        context: context,
+                        initialDate: customEndDate ?? DateTime.now(),
+                        firstDate: customStartDate ?? DateTime(2000),
+                        lastDate: DateTime.now(),
+                      );
+                      if (date != null) {
+                        setState(() => customEndDate = date);
+                      }
+                    },
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  Map<String, DateTime>? result = _getDateRange(
+                    selectedRange,
+                    customStartDate,
+                    customEndDate,
+                  );
+                  
+                  if (result == null && selectedRange == 'custom') {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Please select both start and end dates'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                    return;
+                  }
+                  
+                  Navigator.pop(context, result);
+                },
+                child: const Text('Export'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildRangeOption(
+    String label,
+    String value,
+    String selectedValue,
+    Function(String) onChanged,
+  ) {
+    return RadioListTile<String>(
+      contentPadding: EdgeInsets.zero,
+      dense: true,
+      title: Text(label, style: const TextStyle(fontSize: 15)),
+      value: value,
+      groupValue: selectedValue,
+      onChanged: (val) => onChanged(val!),
+    );
+  }
+
+  Map<String, DateTime>? _getDateRange(
+    String range,
+    DateTime? customStart,
+    DateTime? customEnd,
+  ) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    
+    switch (range) {
+      case 'day':
+        return {
+          'start': today,
+          'end': today,
+        };
+      case 'week':
+        final startOfWeek = today.subtract(Duration(days: today.weekday - 1));
+        return {
+          'start': startOfWeek,
+          'end': today,
+        };
+      case 'month':
+        final startOfMonth = DateTime(now.year, now.month, 1);
+        return {
+          'start': startOfMonth,
+          'end': today,
+        };
+      case 'year':
+        final startOfYear = DateTime(now.year, 1, 1);
+        return {
+          'start': startOfYear,
+          'end': today,
+        };
+      case 'all':
+        return {
+          'start': DateTime(2000, 1, 1),
+          'end': today,
+        };
+      case 'custom':
+        if (customStart != null && customEnd != null) {
+          return {
+            'start': customStart,
+            'end': customEnd,
+          };
+        }
+        return null;
+      default:
+        return {
+          'start': today,
+          'end': today,
+        };
     }
   }
 
