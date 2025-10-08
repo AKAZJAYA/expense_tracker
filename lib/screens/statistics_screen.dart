@@ -11,8 +11,7 @@ class StatisticsScreen extends StatefulWidget {
   State<StatisticsScreen> createState() => _StatisticsScreenState();
 }
 
-class _StatisticsScreenState extends State<StatisticsScreen>
-    with SingleTickerProviderStateMixin {
+class _StatisticsScreenState extends State<StatisticsScreen> with SingleTickerProviderStateMixin {
   Map<String, double> _spendingData = {};
   bool _isLoading = true;
   String _selectedPeriod = 'month';
@@ -56,7 +55,7 @@ class _StatisticsScreenState extends State<StatisticsScreen>
   Future<void> _loadData() async {
     // Fade out
     await _animationController.reverse();
-
+    
     setState(() => _isLoading = true);
 
     DateTime startDate;
